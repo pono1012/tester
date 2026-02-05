@@ -232,8 +232,11 @@ class _TopMoversScreenState extends State<TopMoversScreen> {
           }
           appProvider.setSymbol(mover.symbol);
 
-          Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const ScoreDetailsScreen()));
+          Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) => ScoreDetailsScreen(
+                      externalSignal: signal, externalSymbol: mover.symbol)));
         },
         leading: CircleAvatar(
           backgroundColor: imageUrl != null ? Colors.transparent : color.withOpacity(0.2),
@@ -248,10 +251,20 @@ class _TopMoversScreenState extends State<TopMoversScreen> {
         ),
         title: Text(mover.symbol,
             style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          "Pattern: ${signal.chartPattern}\n${signal.reasons.take(2).join(', ')}",
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Pattern: ${signal.chartPattern}\n${signal.reasons.take(2).join(', ')}",
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "Entry: ${signal.entryPrice.toStringAsFixed(2)} | SL: ${signal.stopLoss.toStringAsFixed(2)}\nTP1: ${signal.takeProfit1.toStringAsFixed(2)} (${signal.tp1Percent?.toStringAsFixed(1)}%) | TP2: ${signal.takeProfit2.toStringAsFixed(2)} (${signal.tp2Percent?.toStringAsFixed(1)}%)",
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
         ),
         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
       ),

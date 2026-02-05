@@ -6,30 +6,38 @@ import 'fundamental_analysis_screen.dart';
 import 'analysis_settings_dialog.dart'; // Import hinzufügen
 
 class ScoreDetailsScreen extends StatelessWidget {
-  const ScoreDetailsScreen({super.key});
+  final TradeSignal? externalSignal;
+  final String? externalSymbol;
+
+  const ScoreDetailsScreen({super.key, this.externalSignal, this.externalSymbol});
 
   @override
   Widget build(BuildContext context) {
-    final data = context.watch<AppProvider>().computedData;
-    final symbol = context.read<AppProvider>().symbol;
+    final appProvider = context.watch<AppProvider>();
+    // Nutze externes Signal (vom Bot/TopMover) falls vorhanden, sonst AppProvider
+    final sig = externalSignal ?? appProvider.computedData?.latestSignal;
+    final symbol = externalSymbol ?? appProvider.symbol;
+    
+    // ComputedData ist nur verfügbar, wenn wir über den AppProvider kommen
+    final data = externalSignal != null ? null : appProvider.computedData;
 
-    if (data == null || data.latestSignal == null) {
+    if (sig == null) {
       return const Scaffold(body: Center(child: Text("Keine Daten")));
     }
 
-    final sig = data.latestSignal!;
     final snapshot = sig.indicatorValues ?? {}; // Bot-Analyse-Snapshot verwenden
 
     // Lade Werte aus dem Snapshot für konsistente Anzeige mit der Bot-Logik
+    // Fallbacks auf 'data' nur, wenn data != null (also nicht im TopMover Modus)
     final lastRsi = snapshot['rsi'] as double? ?? 50;
-    final lastStBull = snapshot['stBull'] as bool? ?? data.stBull.last;
-    final lastPrice = snapshot['price'] as double? ?? data.bars.last.close;
-    final lastEma20 = snapshot['ema20'] as double? ?? data.ema20.last ?? lastPrice;
-    final lastMacdHist = snapshot['macdHist'] as double? ?? data.macdHist.last ?? 0;
-    final squeeze = snapshot['squeeze'] as bool? ?? data.squeezeFlags.last;
-    final lastAdx = snapshot['adx'] as double? ?? data.adx.last ?? 0;
-    final lastStochK = snapshot['stochK'] as double? ?? data.stochK.last ?? 50;
-    final lastObv = snapshot['obv'] as double? ?? data.obv.last ?? 0;
+    final lastStBull = snapshot['stBull'] as bool? ?? (data?.stBull.last ?? false);
+    final lastPrice = snapshot['price'] as double? ?? (data?.bars.last.close ?? 0.0);
+    final lastEma20 = snapshot['ema20'] as double? ?? (data?.ema20.last ?? lastPrice);
+    final lastMacdHist = snapshot['macdHist'] as double? ?? (data?.macdHist.last ?? 0);
+    final squeeze = snapshot['squeeze'] as bool? ?? (data?.squeezeFlags.last ?? false);
+    final lastAdx = snapshot['adx'] as double? ?? (data?.adx.last ?? 0);
+    final lastStochK = snapshot['stochK'] as double? ?? (data?.stochK.last ?? 50);
+    final lastObv = snapshot['obv'] as double? ?? (data?.obv.last ?? 0);
 
     // NEU: Erweiterte Analysen aus dem Snapshot laden
     final isCloudBullish = snapshot['ichimoku_cloud_bull'] as bool? ?? false;
@@ -154,16 +162,17 @@ class ScoreDetailsScreen extends StatelessWidget {
           ),
 
           // Neuer Indikator 2: Bollinger Position
-          _buildIndicatorCard(
-            context,
-            "Bollinger Position",
-            (lastPrice > (data.bbMid.last ?? 0))
-                ? "Obere Hälfte"
-                : "Untere Hälfte",
-            "Neutral",
-            "Zeigt an, ob sich der Preis eher im oberen (bullishen) oder unteren (bearishen) Bereich der Standardabweichung bewegt.",
-            Colors.blueGrey,
-          ),
+          if (data != null) // Nur anzeigen, wenn wir volle Daten haben (nicht im Snapshot enthalten)
+            _buildIndicatorCard(
+              context,
+              "Bollinger Position",
+              (lastPrice > (data.bbMid.last ?? 0))
+                  ? "Obere Hälfte"
+                  : "Untere Hälfte",
+              "Neutral",
+              "Zeigt an, ob sich der Preis eher im oberen (bullishen) oder unteren (bearishen) Bereich der Standardabweichung bewegt.",
+              Colors.blueGrey,
+            ),
 
           // Neuer Indikator 3: Stochastic
           _buildIndicatorCard(

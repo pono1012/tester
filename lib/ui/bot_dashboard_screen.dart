@@ -9,8 +9,15 @@ import 'analysis_stats_screen.dart';
 import '../models/models.dart';
 import 'top_movers_screen.dart';
 
-class BotDashboardScreen extends StatelessWidget {
+class BotDashboardScreen extends StatefulWidget {
   const BotDashboardScreen({super.key});
+
+  @override
+  State<BotDashboardScreen> createState() => _BotDashboardScreenState();
+}
+
+class _BotDashboardScreenState extends State<BotDashboardScreen> {
+  String _filter = "Alle"; // Alle, Offen, Pending, Geschlossen, Plus, Minus
 
   @override
   Widget build(BuildContext context) {
@@ -107,24 +114,54 @@ class BotDashboardScreen extends StatelessWidget {
                   }).toList(),
                 ),
               ),
+              
+              // --- Progress & Status ---
               if (bot.scanStatus.isNotEmpty)
                 Container(
                   width: double.infinity,
                   color: Colors.blueGrey.withOpacity(0.2),
-                  padding: const EdgeInsets.all(4),
-                  child: Text(bot.scanStatus,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 12)),
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  child: Column(
+                    children: [
+                      Text(bot.scanStatus,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12)),
+                      if (bot.scanTotal > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: LinearProgressIndicator(
+                            value: bot.scanCurrent / bot.scanTotal,
+                            minHeight: 2,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
 
               const Divider(height: 1),
+              
+              // --- Filter Bar ---
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    _buildFilterChip("Alle"),
+                    _buildFilterChip("Offen"),
+                    _buildFilterChip("Pending"),
+                    _buildFilterChip("Geschlossen"),
+                    _buildFilterChip("Plus"),
+                    _buildFilterChip("Minus"),
+                  ],
+                ),
+              ),
 
               // --- Trade Liste ---
               Expanded(
                 child: bot.trades.isEmpty
                     ? const Center(
                         child: Text(
-                            "Keine Trades vorhanden.\nDrücke Play um den Markt zu scannen.",
+                            "Keine Trades vorhanden.\nDrücke Play ▶ um den Markt zu scannen.",
                             textAlign: TextAlign.center))
                     : ListView.builder(
                         itemCount: bot.trades.length,
@@ -132,6 +169,20 @@ class BotDashboardScreen extends StatelessWidget {
                           // Neueste zuerst
                           final sortedIndex = bot.trades.length - 1 - index;
                           final trade = bot.trades[sortedIndex];
+                          
+                          // Filter Logic
+                          if (_filter == "Offen" && trade.status != TradeStatus.open) return const SizedBox();
+                          if (_filter == "Pending" && trade.status != TradeStatus.pending) return const SizedBox();
+                          if (_filter == "Geschlossen" && (trade.status == TradeStatus.open || trade.status == TradeStatus.pending)) return const SizedBox();
+                          if (_filter == "Plus") {
+                            double pnl = trade.status == TradeStatus.open ? trade.calcUnrealizedPnL(trade.lastPrice ?? trade.entryPrice) : trade.realizedPnL;
+                            if (pnl <= 0) return const SizedBox();
+                          }
+                          if (_filter == "Minus") {
+                            double pnl = trade.status == TradeStatus.open ? trade.calcUnrealizedPnL(trade.lastPrice ?? trade.entryPrice) : trade.realizedPnL;
+                            if (pnl >= 0) return const SizedBox();
+                          }
+                          
                           return _buildTradeCard(context, trade, bot);
                         },
                       ),
@@ -139,6 +190,17 @@ class BotDashboardScreen extends StatelessWidget {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: _filter == label,
+        onSelected: (v) => setState(() => _filter = label),
       ),
     );
   }
@@ -229,8 +291,34 @@ class BotDashboardScreen extends StatelessWidget {
                           final categories = bot.defaultWatchlistByCategory;
                           return ListView(
                             children: categories.entries.map((categoryEntry) {
+                              final categorySymbols = categoryEntry.value;
+                              
                               return ExpansionTile(
-                                title: Text(categoryEntry.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(categoryEntry.key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        for (final symbol in categorySymbols) {
+                                          bot.toggleWatchlistSymbol(symbol, true);
+                                        }
+                                        setState(() {});
+                                      },
+                                      child: const Text("Alle", style: TextStyle(fontSize: 12)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () {
+                                        for (final symbol in categorySymbols) {
+                                          bot.toggleWatchlistSymbol(symbol, false);
+                                        }
+                                        setState(() {});
+                                      },
+                                      child: const Text("Keine", style: TextStyle(fontSize: 12)),
+                                    ),
+                                  ],
+                                ),
                                 initiallyExpanded: ["Germany (DAX & MDAX)", "US Tech (Nasdaq)", "Crypto"].contains(categoryEntry.key),
                                 children: categoryEntry.value.map((symbol) {
                                   return CheckboxListTile(
@@ -352,15 +440,45 @@ class BotDashboardScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              // 1. Geschlossene Trades (Komplett)
               if (!isOpen && !isPending)
-                Text(
-                    "${trade.realizedPnL > 0 ? '+' : ''}${trade.realizedPnL.toStringAsFixed(2)} €",
-                    style: TextStyle(
-                        color: color,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16)),
+                Builder(builder: (context) {
+                  final pnl = trade.realizedPnL;
+                  final pnlColor = pnl >= 0 ? Colors.green : Colors.red;
+
+                  // Prozent berechnen (basierend auf Entry/Exit Preisen)
+                  double pct = 0.0;
+                  if (trade.exitPrice != null && trade.entryPrice != 0) {
+                    bool isLong = trade.takeProfit1 > trade.entryPrice;
+                    if (isLong) {
+                      pct = ((trade.exitPrice! - trade.entryPrice) / trade.entryPrice) * 100;
+                    } else {
+                      pct = ((trade.entryPrice - trade.exitPrice!) / trade.entryPrice) * 100;
+                    }
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text("${pnl > 0 ? '+' : ''}${pnl.toStringAsFixed(2)} €",
+                          style: TextStyle(
+                              color: pnlColor, fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text("${pct > 0 ? '+' : ''}${pct.toStringAsFixed(2)} %",
+                          style: TextStyle(color: pnlColor, fontSize: 12)),
+                    ],
+                  );
+                }),
+
               if (isOpen || isPending) ...[
-                // Live PnL Anzeige
+                // Falls schon was realisiert wurde (Teilverkauf)
+                if (trade.realizedPnL.abs() > 0.01)
+                  Text(
+                      "${trade.realizedPnL > 0 ? '+' : ''}${trade.realizedPnL.toStringAsFixed(2)} € (Real)",
+                      style: TextStyle(
+                          color: trade.realizedPnL >= 0 ? Colors.green : Colors.red,
+                          fontSize: 10)),
+
+                // Live PnL Anzeige (Unrealized)
                 Builder(builder: (context) {
                   final currentPrice = trade.lastPrice ?? trade.entryPrice;
                   final pnl = trade.calcUnrealizedPnL(currentPrice);
@@ -373,7 +491,7 @@ class BotDashboardScreen extends StatelessWidget {
                           style: TextStyle(
                               color: pnlColor,
                               fontWeight: FontWeight.bold,
-                              fontSize: 14)),
+                        fontSize: 16)),
                       Text("${pct > 0 ? '+' : ''}${pct.toStringAsFixed(2)} %",
                           style: TextStyle(color: pnlColor, fontSize: 12)),
                     ],

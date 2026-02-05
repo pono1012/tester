@@ -9,18 +9,25 @@ class DataService {
   static String? _yahooCookie;
   static String? _yahooCrumb;
 
+  // Setzt die Session zurück, um einen neuen Versuch zu erzwingen
+  void _resetSession() {
+    _yahooCookie = null;
+    _yahooCrumb = null;
+  }
+
   // Holt sich erst einen Cookie von der Hauptseite und dann den Crumb von der API
   Future<void> _ensureYahooSession() async {
     if (_yahooCrumb != null) return;
 
     try {
-      debugPrint("Initialisiere Yahoo Session (Cookie & Crumb)...");
+      debugPrint("🍪 [Yahoo] Initialisiere Session...");
       const userAgent =
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 
       // 1. Cookie holen
       final r1 = await http.get(Uri.parse('https://finance.yahoo.com'),
           headers: {"User-Agent": userAgent});
+      
       final rawCookie = r1.headers['set-cookie'];
 
       if (rawCookie != null) {
@@ -33,11 +40,13 @@ class DataService {
 
         if (r2.statusCode == 200) {
           _yahooCrumb = r2.body.trim();
-          debugPrint("Yahoo Crumb erhalten: $_yahooCrumb");
+          debugPrint("✅ [Yahoo] Crumb erhalten: $_yahooCrumb");
+        } else {
+          debugPrint("⚠️ [Yahoo] Crumb Fehler: ${r2.statusCode}");
         }
       }
     } catch (e) {
-      debugPrint("Yahoo Session Init Fehler: $e");
+      debugPrint("❌ [Yahoo] Session Init Fehler: $e");
     }
   }
 
@@ -50,18 +59,17 @@ class DataService {
         final bars = await _fetchBarsStooq(symbol);
         if (bars.isNotEmpty) return bars;
       } catch (e) {
-        debugPrint("Stooq Fehler (evtl. Limit): $e");
+        debugPrint("⚠️ [Stooq] Fehler (evtl. Limit): $e");
       }
     }
 
     // 2. Versuch: Yahoo Finance (JSON) als Fallback
-    debugPrint(
-        "Versuche Yahoo Finance für Chart-Daten (Intervall: ${interval.name})...");
+    debugPrint("📉 [Yahoo] Lade Chart-Daten für $symbol (${interval.name})...");
     try {
       final bars = await _fetchBarsYahoo(symbol, interval: interval);
       return bars;
     } catch (e) {
-      debugPrint("Yahoo Chart Fehler: $e");
+      debugPrint("❌ [Yahoo] Chart Fehler: $e");
       throw Exception(
           "Keine Daten für ${interval.name} verfügbar (Stooq/Yahoo Fehler).");
     }
@@ -71,19 +79,14 @@ class DataService {
     final cleanSym = symbol.trim().toLowerCase();
     final url = Uri.parse('https://stooq.com/q/d/l/?s=$cleanSym&i=d');
 
-    debugPrint("--- Stooq Fetch Start: $cleanSym ---");
-    debugPrint("URL: $url");
+    debugPrint("📉 [Stooq] Fetch Start: $cleanSym");
 
     try {
       final resp = await http.get(url);
-      debugPrint("Stooq HTTP Status: ${resp.statusCode}");
       if (resp.statusCode != 200)
         throw Exception("Fehler beim Laden (HTTP ${resp.statusCode})");
 
       final content = utf8.decode(resp.bodyBytes);
-      // Preview loggen, um zu sehen ob HTML oder "No data" kommt
-      debugPrint(
-          "Stooq Response Preview: ${content.substring(0, math.min(content.length, 200)).replaceAll("\n", " ")}");
 
       // Check auf Limit-Nachricht oder HTML
       if (content.contains("limit exceeded") ||
@@ -93,7 +96,7 @@ class DataService {
 
       final lines = const LineSplitter().convert(content);
       if (lines.length < 2) {
-        debugPrint("Stooq: Zu wenige Zeilen (${lines.length}).");
+        debugPrint("⚠️ [Stooq] Zu wenige Zeilen (${lines.length}).");
         return [];
       }
 
@@ -125,20 +128,19 @@ class DataService {
         }
       }
 
-      debugPrint(
-          "Stooq: ${bars.length} Bars erfolgreich geparst. (Fehlerhafte Zeilen: $parseErrors)");
+      debugPrint("✅ [Stooq] ${bars.length} Bars geladen für $cleanSym (Errors: $parseErrors)");
 
       // Sortieren nach Datum aufsteigend
       bars.sort((a, b) => a.date.compareTo(b.date));
       return bars;
     } catch (e) {
-      debugPrint("Stooq Exception: $e");
+      debugPrint("❌ [Stooq] Exception: $e");
       throw e; // Weiterwerfen für Fallback
     }
   }
 
   Future<List<PriceBar>> _fetchBarsYahoo(String symbol,
-      {TimeFrame interval = TimeFrame.d1}) async {
+      {TimeFrame interval = TimeFrame.d1, bool isRetry = false}) async {
     await _ensureYahooSession();
 
     // Symbol Konvertierung (ähnlich wie bei Fundamentals)
@@ -176,17 +178,23 @@ class DataService {
     };
     if (_yahooCookie != null) headers["Cookie"] = _yahooCookie!;
 
-    debugPrint("Yahoo Chart URL: $url");
     final resp = await http.get(url, headers: headers);
 
     if (resp.statusCode != 200) {
-      throw Exception("Yahoo API Status: ${resp.statusCode}");
+      // Bei 401 (Unauthorized) einmalig Session resetten und neu versuchen
+      if (resp.statusCode == 401 && !isRetry) {
+        debugPrint("🔄 [Yahoo] 401 bei Chart-Daten. Erneuere Session...");
+        _resetSession();
+        return _fetchBarsYahoo(symbol, interval: interval, isRetry: true);
+      }
+
+      throw Exception("Yahoo API Status: ${resp.statusCode} ($url)");
     }
 
     final json = jsonDecode(resp.body);
     final result = json['chart']['result'];
     if (result == null || (result as List).isEmpty)
-      throw Exception("Yahoo: Leeres Result");
+      throw Exception("Yahoo: Leeres Result für $ySymbol");
 
     final data = result[0];
     final timestamps = List<int>.from(data['timestamp'] ?? []);
@@ -210,7 +218,7 @@ class DataService {
         volume: (volumes[i] ?? 0).toInt(),
       ));
     }
-    debugPrint("Yahoo: ${bars.length} Bars geladen.");
+    debugPrint("✅ [Yahoo] ${bars.length} Bars geladen für $ySymbol.");
     return bars;
   }
 
@@ -239,7 +247,7 @@ class DataService {
 
     String ySymbol = _normalizeSymbolForYahoo(symbol);
 
-    debugPrint("Lade Fundamentals von Yahoo für: $ySymbol");
+    debugPrint("📊 [Yahoo] Lade Fundamentals: $ySymbol");
 
     // Session sicherstellen (Cookie/Crumb)
     await _ensureYahooSession();
@@ -270,19 +278,14 @@ class DataService {
           .get(url, headers: headers)
           .timeout(const Duration(seconds: 10));
 
-      debugPrint("Yahoo Primary API Status: ${resp.statusCode} für $ySymbol");
-
       // Fallback: Wenn 401/403 (Unauthorized), versuche die einfachere Quote-API
       if (resp.statusCode == 401 || resp.statusCode == 403) {
-        debugPrint(
-            "Yahoo Primary API Auth Error. Body: ${resp.body.substring(0, math.min(resp.body.length, 150))}");
+        debugPrint("⚠️ [Yahoo] Primary API Auth Error. Versuche Fallback...");
         return await _fetchFundamentalsFallback(ySymbol, headers);
       }
 
       if (resp.statusCode != 200) {
-        debugPrint("Yahoo Error Code: ${resp.statusCode} für $ySymbol");
-        debugPrint(
-            "Body: ${resp.body.substring(0, math.min(resp.body.length, 200))}...");
+        debugPrint("❌ [Yahoo] Error Code: ${resp.statusCode} für $ySymbol");
         return null;
       }
 
@@ -322,13 +325,12 @@ class DataService {
         currency: getStr(financial, 'financialCurrency'),
       );
 
-      debugPrint(
-          "Fundamentals erfolgreich geladen für $ySymbol. KGV: ${fd.peRatio}");
+      debugPrint("✅ [Yahoo] Fundamentals geladen: $ySymbol (KGV: ${fd.peRatio})");
       return fd;
     } catch (e) {
       // Fehler beim Abruf oder Parsen ignorieren wir hier stillschweigend,
       // da es Zusatzdaten sind.
-      debugPrint("Fehler bei Fundamentals: $e");
+      debugPrint("❌ [Yahoo] Fehler bei Fundamentals: $e");
       return null;
     }
   }
@@ -336,7 +338,7 @@ class DataService {
   // Fallback-Methode für einfachere Daten (ohne Sektor/Industrie, aber mit KGV/Marktkap)
   Future<FundamentalData?> _fetchFundamentalsFallback(
       String symbol, Map<String, String> headers) async {
-    debugPrint("Versuche Fallback-API für $symbol");
+    debugPrint("🔄 [Yahoo] Versuche Fallback-API für $symbol");
 
     String urlStr =
         'https://query2.finance.yahoo.com/v7/finance/quote?symbols=$symbol';
@@ -349,23 +351,20 @@ class DataService {
       final resp = await http
           .get(url, headers: headers)
           .timeout(const Duration(seconds: 10));
-      debugPrint("Fallback API Status: ${resp.statusCode} für $symbol");
 
       if (resp.statusCode != 200) {
-        debugPrint("Fallback API Error Body: ${resp.body}");
+        debugPrint("❌ [Yahoo] Fallback API Error: ${resp.statusCode}");
         return null;
       }
 
       final json = jsonDecode(resp.body);
       final result = json['quoteResponse']['result'];
       if (result == null || (result as List).isEmpty) {
-        debugPrint(
-            "Fallback: Keine Daten in quoteResponse['result'] für $symbol");
         return null;
       }
 
       final data = result[0];
-      debugPrint("Fallback: Daten erfolgreich geladen für $symbol");
+      debugPrint("✅ [Yahoo] Fallback Daten geladen für $symbol");
 
       return FundamentalData(
         sector: null, // Nicht verfügbar in dieser API
@@ -380,16 +379,16 @@ class DataService {
         currency: data['currency'],
       );
     } catch (e, stack) {
-      debugPrint("Fallback Fehler: $e\n$stack");
+      debugPrint("❌ [Yahoo] Fallback Fehler: $e");
       return null;
     }
   }
 
-  Future<double?> fetchRegularMarketPrice(String symbol) async {
+  Future<double?> fetchRegularMarketPrice(String symbol, {bool isRetry = false}) async {
     // Symbol mapping logic from fetchFundamentals
     String ySymbol = _normalizeSymbolForYahoo(symbol);
 
-    debugPrint("Lade Live-Preis von Yahoo für: $ySymbol");
+    debugPrint("💲 [Yahoo] Lade Live-Preis: $ySymbol");
 
     await _ensureYahooSession();
 
@@ -414,14 +413,21 @@ class DataService {
           .timeout(const Duration(seconds: 10));
 
       if (resp.statusCode != 200) {
-        debugPrint("Live Preis API Error: ${resp.statusCode} für $ySymbol");
+        // Bei 401 (Unauthorized) einmalig Session resetten und neu versuchen
+        if (resp.statusCode == 401 && !isRetry) {
+          debugPrint("🔄 [Yahoo] 401 bei Live-Preis. Erneuere Session...");
+          _resetSession();
+          return fetchRegularMarketPrice(symbol, isRetry: true);
+        }
+
+        debugPrint("❌ [Yahoo] Live Preis API Error: ${resp.statusCode} für $ySymbol");
         return null;
       }
 
       final json = jsonDecode(resp.body);
       final result = json['quoteResponse']['result'];
       if (result == null || (result as List).isEmpty) {
-        debugPrint("Live Preis: Keine Daten für $ySymbol");
+        debugPrint("⚠️ [Yahoo] Live Preis: Keine Daten für $ySymbol");
         return null;
       }
 
@@ -434,14 +440,13 @@ class DataService {
           (marketState == "REGULAR" ||
               marketState == "PRE" ||
               marketState == "POST")) {
-        debugPrint("Live Preis für $ySymbol: $price (Status: $marketState)");
+        debugPrint("✅ [Yahoo] Live Preis $ySymbol: $price ($marketState)");
         return price.toDouble();
       }
-      debugPrint(
-          "Live Preis für $ySymbol nicht im REGULAR-Markt gefunden (Status: $marketState)");
+      debugPrint("⚠️ [Yahoo] Live Preis $ySymbol nicht im REGULAR-Markt ($marketState)");
       return null;
     } catch (e) {
-      debugPrint("Live Preis Fehler: $e");
+      debugPrint("❌ [Yahoo] Live Preis Fehler: $e");
       return null;
     }
   }
@@ -458,7 +463,7 @@ class DataService {
       fmpSymbol = fmpSymbol.replaceAll(".DEF", ".DE");
     }
 
-    debugPrint("--- FMP Fetch Start: $fmpSymbol ---");
+    debugPrint("🏢 [FMP] Fetch Start: $fmpSymbol");
 
     // Default Werte
     String companyName = fmpSymbol;
@@ -533,11 +538,10 @@ class DataService {
             currency = p['currency'];
 
             profileLoaded = true;
-            debugPrint("FMP Profile erfolgreich geladen.");
+            debugPrint("✅ [FMP] Profile geladen.");
           }
         } else {
-          debugPrint(
-              "FMP Profile Status: ${respProfile.statusCode} (Nutze Fallback)");
+          debugPrint("⚠️ [FMP] Profile Status: ${respProfile.statusCode} (Nutze Fallback)");
         }
       } catch (e) {
         debugPrint("FMP Profile Fehler: $e");
@@ -564,18 +568,17 @@ class DataService {
             if (peRatio == null) peRatio = (q['pe'] as num?)?.toDouble();
             if (currency == null) currency = q['currency'];
 
-            debugPrint("FMP Quote geladen (Preis: $price, PE: $peRatio)");
+            debugPrint("✅ [FMP] Quote geladen (Preis: $price, PE: $peRatio)");
           }
         }
       } catch (e) {
-        debugPrint("FMP Quote Fehler: $e");
+        debugPrint("❌ [FMP] Quote Fehler: $e");
       }
 
       // 3. Key Metrics (User URL: /stable/key-metrics)
       // Hier holen wir die detaillierten Kennzahlen
       final urlMetrics = Uri.parse(
           'https://financialmodelingprep.com/stable/key-metrics?symbol=$fmpSymbol&apikey=$apiKey');
-      debugPrint("FMP Metrics URL: $urlMetrics");
 
       try {
         final respMetrics =
@@ -602,20 +605,19 @@ class DataService {
 
             dividendYield = (m['dividendYield'] as num?)?.toDouble();
 
-            debugPrint("FMP Metrics geladen.");
+            debugPrint("✅ [FMP] Metrics geladen.");
           }
         } else {
-          debugPrint("FMP Metrics Status: ${respMetrics.statusCode}");
+          debugPrint("⚠️ [FMP] Metrics Status: ${respMetrics.statusCode}");
         }
       } catch (e) {
-        debugPrint("FMP Metrics Fehler: $e");
+        debugPrint("❌ [FMP] Metrics Fehler: $e");
       }
 
       // 4. Ratios (User URL: /stable/ratios)
       // Ergänzung für PE, PB, DebtToEquity etc.
       final urlRatios = Uri.parse(
           'https://financialmodelingprep.com/stable/ratios?symbol=$fmpSymbol&apikey=$apiKey');
-      debugPrint("FMP Ratios URL: $urlRatios");
 
       try {
         final respRatios =
@@ -637,13 +639,13 @@ class DataService {
             if (r['dividendYield'] != null)
               dividendYield = (r['dividendYield'] as num).toDouble();
 
-            debugPrint("FMP Ratios geladen.");
+            debugPrint("✅ [FMP] Ratios geladen.");
           }
         } else {
-          debugPrint("FMP Ratios Status: ${respRatios.statusCode}");
+          debugPrint("⚠️ [FMP] Ratios Status: ${respRatios.statusCode}");
         }
       } catch (e) {
-        debugPrint("FMP Ratios Fehler: $e");
+        debugPrint("❌ [FMP] Ratios Fehler: $e");
       }
 
       // Mapping
@@ -681,7 +683,7 @@ class DataService {
         dcf: dcf,
       );
     } catch (e, stack) {
-      debugPrint("FMP Exception: $e\n$stack");
+      debugPrint("❌ [FMP] Exception: $e");
       return null;
     }
   }
@@ -694,7 +696,7 @@ class DataService {
 
     final url = Uri.parse(
         "https://feeds.finance.yahoo.com/rss/2.0/headline?s=$ySymbol&region=US&lang=en-US");
-    debugPrint("Lade News von: $url");
+    debugPrint("📰 [Yahoo] Lade News für $ySymbol");
 
     try {
       final resp = await http.get(url);
@@ -721,7 +723,7 @@ class DataService {
         return items;
       }
     } catch (e) {
-      debugPrint("News Fehler: $e");
+      debugPrint("❌ [Yahoo] News Fehler: $e");
     }
     return [];
   }

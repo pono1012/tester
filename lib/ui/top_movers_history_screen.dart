@@ -30,21 +30,23 @@ class _TopMoversHistoryScreenState extends State<TopMoversHistoryScreen> {
     final allSymbols =
         history.expand((scan) => scan.topMovers.map((m) => m.symbol)).toSet();
 
-    for (final symbol in allSymbols) {
+    // Parallel laden für mehr Speed
+    Map<String, double?> newPrices = {};
+    await Future.wait(allSymbols.map((symbol) async {
       try {
         final price = await _dataService.fetchRegularMarketPrice(symbol);
-        if (mounted) {
-          setState(() {
-            _currentPrices[symbol] = price;
-          });
-        }
+        newPrices[symbol] = price;
       } catch (e) {
         debugPrint("Could not fetch price for $symbol: $e");
+        // Auch bei Fehler null setzen, damit wir wissen, dass wir es versucht haben
       }
-    }
+    }));
 
     if (mounted) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _currentPrices.addAll(newPrices);
+        _isLoading = false;
+      });
     }
   }
 
@@ -113,12 +115,12 @@ class _TopMoversHistoryScreenState extends State<TopMoversHistoryScreen> {
             ),
             title: Text(mover.symbol, style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text("Kurs damals: ${mover.priceAtScan.toStringAsFixed(2)}"),
-            trailing: change == null
+            trailing: _isLoading && change == null
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : Text(
-                    "${change > 0 ? '+' : ''}${change.toStringAsFixed(1)}%",
+                    change != null ? "${change > 0 ? '+' : ''}${change.toStringAsFixed(1)}%" : "-",
                     style: TextStyle(
-                      color: isSuccess ? Colors.green : Colors.red,
+                      color: change != null ? (isSuccess ? Colors.green : Colors.red) : Colors.grey,
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
                     ),

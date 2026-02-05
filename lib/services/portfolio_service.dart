@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart'; // Deine existierenden Models (PriceBar, Signal etc.)
+export '../models/models.dart';
 import '../models/trade_record.dart';
 import 'data_service.dart';
 import 'ta_indicators.dart';
@@ -125,10 +126,19 @@ class PortfolioService extends ChangeNotifier {
   String _scanStatus = "";
   bool _cancelRequested = false; // Flag to stop the loop
   String get scanStatus => _scanStatus;
+  
+  // NEU: Progress Tracking
+  int _scanCurrent = 0;
+  int _scanTotal = 0;
+  int get scanCurrent => _scanCurrent;
+  int get scanTotal => _scanTotal;
 
   // NEU: Top Movers Historie
   List<TopMoverScanResult> _topMoverHistory = [];
   List<TopMoverScanResult> get topMoverHistory => _topMoverHistory;
+
+  // Cache: Wann wurde ein Symbol zuletzt im "Scan New" Modus analysiert?
+  final Map<String, DateTime> _lastAnalysisTime = {};
 
   Map<String, List<String>> get defaultWatchlistByCategory => _defaultWatchlistByCategory;
 
@@ -227,6 +237,7 @@ class PortfolioService extends ChangeNotifier {
     _maxOpenPositions = 5;
     _unlimitedPositions = false;
 
+    _lastAnalysisTime.clear(); // Cache leeren bei Reset
     _stopMethod = 2; // ATR
     _stopPercent = 5.0;
     _entryStrategy = 0; // Market
@@ -272,6 +283,8 @@ class PortfolioService extends ChangeNotifier {
     _isScanning = true;
     _cancelRequested = false;
     _scanStatus = "Starte Routine...";
+    _scanCurrent = 0;
+    _scanTotal = 0;
     notifyListeners();
 
     try {
@@ -293,7 +306,7 @@ class PortfolioService extends ChangeNotifier {
       _scanStatus = "Fertig.";
     } catch (e) {
       _scanStatus = "Fehler: $e";
-      debugPrint("Bot Error: $e");
+      debugPrint("❌ [Bot] Critical Error: $e");
     } finally {
       _isScanning = false;
       _savePortfolio();
@@ -311,8 +324,24 @@ class PortfolioService extends ChangeNotifier {
   }
 
   // Helper: Fetch Data in Parallel (Smart Loading)
-  Future<Map<String, dynamic>> _fetchDataForSymbol(String symbol) async {
+  Future<Map<String, dynamic>> _fetchDataForSymbol(String symbol, {DateTime? lastScanDate}) async {
     try {
+      // Optimierung: Historie (Stooq) nur laden, wenn der letzte Scan länger als 48h her ist.
+      // Sonst reicht der Live-Preis (Yahoo).
+      bool fetchHistory = true;
+      if (lastScanDate != null) {
+        final diff = DateTime.now().difference(lastScanDate);
+        if (diff.inHours < 48) {
+          fetchHistory = false;
+        }
+      }
+
+      if (!fetchHistory) {
+        // debugPrint("ℹ️ [Bot] $symbol: Stooq übersprungen (< 48h). Nur Live-Preis.");
+        final livePrice = await _dataService.fetchRegularMarketPrice(symbol);
+        return {'bars': <PriceBar>[], 'livePrice': livePrice, 'error': null};
+      }
+
       // Parallel fetch of bars and live price
       final results = await Future.wait([
         _dataService.fetchBars(symbol),
@@ -334,7 +363,9 @@ class PortfolioService extends ChangeNotifier {
         _trades.where((t) => t.status == TradeStatus.pending).toList();
     if (pendingTrades.isEmpty) return;
 
-    _scanStatus = "Prüfe ${pendingTrades.length} Pending Orders...";
+    _scanTotal = pendingTrades.length;
+    _scanCurrent = 0;
+    _scanStatus = "Prüfe Pending Orders...";
     notifyListeners();
 
     // Batch processing for speed
@@ -345,11 +376,15 @@ class PortfolioService extends ChangeNotifier {
       final batch = pendingTrades.sublist(i, end);
 
       // Parallel Fetching
-      final dataResults = await Future.wait(batch.map((t) => _fetchDataForSymbol(t.symbol)));
+      final dataResults = await Future.wait(batch.map((t) => _fetchDataForSymbol(t.symbol, lastScanDate: t.lastScanDate)));
 
       for (var j = 0; j < batch.length; j++) {
         final trade = batch[j];
         final data = dataResults[j];
+        
+        _scanCurrent++;
+        _scanStatus = "Prüfe Pending: ${trade.symbol} ($_scanCurrent/$_scanTotal)";
+        notifyListeners();
 
       try {
         if (data['error'] != null) throw data['error'];
@@ -423,9 +458,20 @@ class PortfolioService extends ChangeNotifier {
               // ENTRY HIT!
               // SL/TP anpassen an Gap (Risiko gleich halten)
               final diff = execPrice - currentTrade.entryPrice;
-              final newSl = currentTrade.stopLoss + diff;
+              double newSl = currentTrade.stopLoss + diff;
               final newTp1 = currentTrade.takeProfit1 + diff;
               final newTp2 = currentTrade.takeProfit2 + diff;
+
+              // SAFETY CHECK: SL muss auf der richtigen Seite bleiben
+              if (isLong) {
+                if (newSl >= execPrice) {
+                  newSl = execPrice * 0.99;
+                }
+              } else {
+                if (newSl <= execPrice) {
+                  newSl = execPrice * 1.01;
+                }
+              }
 
               currentTrade = currentTrade.copyWith(
                 status: TradeStatus.open,
@@ -438,8 +484,7 @@ class PortfolioService extends ChangeNotifier {
                 lastScanDate: bar.date,
               );
               tradeUpdated = true;
-              debugPrint("Pending Order ausgeführt (Sim): ${currentTrade.symbol} @ $execPrice am ${bar.date}");
-              // WICHTIG: Kein 'continue', wir fallen durch zur Exit-Prüfung im selben Loop!
+              debugPrint("⚡ [Bot] Pending Order Executed (Sim): ${currentTrade.symbol} @ $execPrice");
             }
           }
 
@@ -513,18 +558,30 @@ class PortfolioService extends ChangeNotifier {
           if (shouldExecute) {
             // Entry zum Live-Preis
             final diff = livePrice - currentTrade.entryPrice;
+            double newSl = currentTrade.stopLoss + diff;
+            final newTp1 = currentTrade.takeProfit1 + diff;
+            final newTp2 = currentTrade.takeProfit2 + diff;
+
+            // SAFETY CHECK: SL muss auf der richtigen Seite bleiben
+            if (isLong) {
+              if (newSl >= livePrice) newSl = livePrice * 0.99;
+            } else {
+              if (newSl <= livePrice) newSl = livePrice * 1.01;
+            }
+
             currentTrade = currentTrade.copyWith(
               status: TradeStatus.open,
               entryExecutionDate: DateTime.now(),
               executionPrice: livePrice,
               entryPrice: livePrice,
-              stopLoss: currentTrade.stopLoss + diff,
-              takeProfit1: currentTrade.takeProfit1 + diff,
-              takeProfit2: currentTrade.takeProfit2 + diff,
+              stopLoss: newSl,
+              takeProfit1: newTp1,
+              takeProfit2: newTp2,
               lastScanDate: DateTime.now(),
             );
             tradeUpdated = true;
-            debugPrint("Pending Order LIVE ausgeführt: ${currentTrade.symbol} @ $livePrice");
+            debugPrint("⚡ [Bot] Pending Order Executed (LIVE): ${currentTrade.symbol} @ $livePrice");
+
           }
         }
 
@@ -557,7 +614,7 @@ class PortfolioService extends ChangeNotifier {
           }
         }
       } catch (e) {
-        debugPrint("Fehler bei Pending Order ${trade.symbol}: $e");
+        debugPrint("❌ [Bot] Fehler bei Pending Order ${trade.symbol}: $e");
       }
       } // End Batch Loop
     }
@@ -568,7 +625,9 @@ class PortfolioService extends ChangeNotifier {
         _trades.where((t) => t.status == TradeStatus.open).toList();
     if (openTrades.isEmpty) return;
 
-    _scanStatus = "Prüfe ${openTrades.length} offene Positionen...";
+    _scanTotal = openTrades.length;
+    _scanCurrent = 0;
+    _scanStatus = "Prüfe offene Positionen...";
     notifyListeners();
 
     // Batch processing for speed
@@ -579,11 +638,15 @@ class PortfolioService extends ChangeNotifier {
       final batch = openTrades.sublist(i, end);
 
       // Parallel Fetching
-      final dataResults = await Future.wait(batch.map((t) => _fetchDataForSymbol(t.symbol)));
+      final dataResults = await Future.wait(batch.map((t) => _fetchDataForSymbol(t.symbol, lastScanDate: t.lastScanDate)));
 
       for (var j = 0; j < batch.length; j++) {
         final trade = batch[j];
         final data = dataResults[j];
+        
+        _scanCurrent++;
+        _scanStatus = "Manage Position: ${trade.symbol} ($_scanCurrent/$_scanTotal)";
+        notifyListeners();
 
       try {
         if (data['error'] != null) throw data['error'];
@@ -660,19 +723,28 @@ class PortfolioService extends ChangeNotifier {
         }
 
         // 3. Live Price Update & Exit Check
-        if (currentTrade.status == TradeStatus.open && livePrice != null) {
-          final liveBar = PriceBar(
-              date: DateTime.now(),
-              open: livePrice,
-              high: livePrice,
-              low: livePrice,
-              close: livePrice,
-              volume: 0);
-          final exitResult = _checkExitConditions(currentTrade, liveBar);
-          if (exitResult != null) {
-            currentTrade = exitResult;
-          } else {
-            currentTrade = currentTrade.copyWith(lastPrice: livePrice);
+        if (currentTrade.status == TradeStatus.open) {
+          // Fallback: Wenn Live-Preis fehlt, nehmen wir den letzten Close der History
+          // Damit PnL nicht 0.00 anzeigt.
+          double? priceToUse = livePrice ?? (bars.isNotEmpty ? bars.last.close : null);
+
+          if (livePrice != null) {
+            // Nur wenn wir wirklich einen LIVE Preis haben, prüfen wir Exit Conditions "in Echtzeit"
+            final liveBar = PriceBar(
+                date: DateTime.now(),
+                open: livePrice,
+                high: livePrice,
+                low: livePrice,
+                close: livePrice,
+                volume: 0);
+            final exitResult = _checkExitConditions(currentTrade, liveBar);
+            if (exitResult != null) {
+              currentTrade = exitResult;
+            }
+          }
+          
+          if (priceToUse != null) {
+            currentTrade = currentTrade.copyWith(lastPrice: priceToUse);
           }
           tradeUpdated = true;
         }
@@ -685,7 +757,7 @@ class PortfolioService extends ChangeNotifier {
           if (index != -1) _trades[index] = currentTrade;
         }
       } catch (e) {
-        debugPrint("Fehler beim Check von ${trade.symbol}: $e");
+        debugPrint("❌ [Bot] Fehler beim Check von ${trade.symbol}: $e");
       }
       } // End Batch Loop
     }
@@ -762,14 +834,27 @@ class PortfolioService extends ChangeNotifier {
     final activeSymbols =
         _watchListMap.entries.where((e) => e.value).map((e) => e.key).toList();
 
+    _scanTotal = activeSymbols.length;
+    _scanCurrent = 0;
+
     for (var symbol in activeSymbols) {
       if (_cancelRequested) {
         _scanStatus = "Scan abgebrochen.";
         break;
       }
+      _scanCurrent++;
+
+      // OPTIMIERUNG: Überspringe Symbol, wenn es kürzlich erst gescannt wurde
+      // Wir nutzen das _autoIntervalMinutes als Referenz.
+      if (_lastAnalysisTime.containsKey(symbol)) {
+        final lastScan = _lastAnalysisTime[symbol]!;
+        if (DateTime.now().difference(lastScan).inMinutes < _autoIntervalMinutes) {
+          continue; // Überspringen, Daten sind noch "frisch genug"
+        }
+      }
 
       try {
-        _scanStatus = "Analysiere $symbol...";
+        _scanStatus = "Analysiere $symbol ($_scanCurrent/$_scanTotal)...";
         notifyListeners();
 
         // Check Max Positions
@@ -779,7 +864,8 @@ class PortfolioService extends ChangeNotifier {
           if (openCount >= _maxOpenPositions) {
             _scanStatus =
                 "Max Positionen ($openCount/$_maxOpenPositions) erreicht.";
-            debugPrint("Bot: Max Positionen Limit erreicht ($openCount >= $_maxOpenPositions). Keine neuen Trades.");
+
+            debugPrint("⚠️ [Bot] Max Positionen erreicht ($openCount/$_maxOpenPositions).");
             notifyListeners(); // UI updaten
             break; // Keine neuen Trades mehr
           }
@@ -787,6 +873,10 @@ class PortfolioService extends ChangeNotifier {
 
         // 1. Daten laden
         final bars = await _dataService.fetchBars(symbol, interval: _botTimeFrame);
+        
+        // Zeitstempel aktualisieren (damit wir nicht sofort wieder Stooq abrufen)
+        _lastAnalysisTime[symbol] = DateTime.now();
+
         if (bars.length < 50) continue;
 
         // 2. Analyse durchführen
@@ -819,7 +909,7 @@ class PortfolioService extends ChangeNotifier {
         await Future.delayed(const Duration(milliseconds: 200));
       } catch (e) {
         // Fehler bei einem Symbol soll nicht den ganzen Bot stoppen
-        debugPrint("Fehler bei $symbol: $e");
+        debugPrint("❌ [Bot] Fehler bei Scan von $symbol: $e");
         continue;
       }
     }
@@ -1131,6 +1221,16 @@ class PortfolioService extends ChangeNotifier {
 
     double rrFactor = risk == 0 ? 0 : (tp2 - entry).abs() / risk;
 
+    // Calculate TP percentages
+    double? tp1Percent, tp2Percent;
+    if (isLong) {
+      tp1Percent = ((tp1 - entry) / entry) * 100;
+      tp2Percent = ((tp2 - entry) / entry) * 100;
+    } else {
+      tp1Percent = ((entry - tp1) / entry) * 100;
+      tp2Percent = ((entry - tp2) / entry) * 100;
+    }
+
     // Snapshot Daten für Detailansicht
     final snapshot = {
       'rsi': lastRsi,
@@ -1158,6 +1258,8 @@ class PortfolioService extends ChangeNotifier {
         score: score,
         reasons: reasons,
         chartPattern: pattern,
+        tp1Percent: tp1Percent,
+        tp2Percent: tp2Percent,
         indicatorValues: snapshot);
   }
 
@@ -1188,11 +1290,15 @@ class PortfolioService extends ChangeNotifier {
     // Durch Gaps oder Rechenungenauigkeiten darf der SL nicht auf die falsche Seite rutschen.
     bool isLong = signal.type.contains("Buy");
     if (isLong) {
-      if (adjustedStopLoss >= executionPrice)
+      if (adjustedStopLoss >= executionPrice) {
         adjustedStopLoss = executionPrice * 0.99;
+        debugPrint("⚠️ [Bot] SL Korrektur bei Order (Long): SL >= Entry.");
+      }
     } else {
-      if (adjustedStopLoss <= executionPrice)
+      if (adjustedStopLoss <= executionPrice) {
         adjustedStopLoss = executionPrice * 1.01;
+        debugPrint("⚠️ [Bot] SL Korrektur bei Order (Short): SL <= Entry.");
+      }
     }
 
     // Status bestimmen
@@ -1250,8 +1356,8 @@ class PortfolioService extends ChangeNotifier {
 
     _trades.add(newTrade);
     _virtualBalance -= (executionPrice * qty); // Geld abziehen
-    debugPrint(
-        "Order erstellt (${initialStatus.name}): $symbol @ $executionPrice");
+
+    debugPrint("🛒 [Bot] ORDER ERSTELLT (${initialStatus.name}): $symbol @ $executionPrice");
     _savePortfolio(); // Sofort speichern
   }
 
@@ -1276,7 +1382,7 @@ class PortfolioService extends ChangeNotifier {
     trade.tp1Hit = true;
     trade.stopLoss = trade.entryPrice; // SL auf Break-Even setzen
 
-    debugPrint("Trade ${trade.symbol} hit TP1. Sold ${_tp1SellFraction * 100}%. New Qty: ${trade.quantity}. PnL: ${pnlFromPartialClose.toStringAsFixed(2)}. SL to B/E.");
+    debugPrint("💰 [Bot] TP1 HIT: ${trade.symbol} | Sold ${_tp1SellFraction * 100}% | PnL: ${pnlFromPartialClose.toStringAsFixed(2)}");
   }
 
   void _closeTrade(
@@ -1298,8 +1404,7 @@ class PortfolioService extends ChangeNotifier {
 
     // Kapital zurückbuchen (Invest für diesen Teil + PnL für diesen Teil)
     _virtualBalance += (trade.entryPrice * trade.quantity) + pnlForThisClose;
-    debugPrint(
-        "Trade geschlossen: ${trade.symbol} PnL: ${trade.realizedPnL.toStringAsFixed(2)}");
+    debugPrint("💵 [Bot] TRADE CLOSED: ${trade.symbol} | PnL: ${trade.realizedPnL.toStringAsFixed(2)}");
     _savePortfolio(); // Sofort speichern
   }
 
