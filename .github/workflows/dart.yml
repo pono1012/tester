@@ -1,0 +1,320 @@
+name: Multi-Platform-Build
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      use_ai:
+        description: 'KI Analyse aktivieren?'
+        required: true
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: write # WICHTIG: Erlaubt dem Bot, Releases zu erstellen & README zu pushen
+
+jobs:
+  # --- JOB 1: KI ANALYSE ---
+  analyze_changes:
+    name: 🧠 AI Analysis
+    runs-on: ubuntu-latest
+    outputs:
+      full_notes: ${{ steps.generate_notes.outputs.full_notes || '⚠️ KI-Analyse momentan nicht verfügbar.' }}
+      summary: ${{ steps.generate_notes.outputs.summary || 'Update' }}
+      run_status: ${{ steps.generate_notes.outputs.run_status || 'skipped' }}
+      install_text: ${{ steps.read_install.outputs.content }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Wichtig für die KI-Historie
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      # Lädt die Installationsanleitung in eine Variable
+      - name: 📄 Read Install Template
+        id: read_install
+        run: |
+          # Prüfen ob Datei existiert, sonst Fallback
+          if [ -f .github/templates/INSTALLATION.md ]; then
+            content=$(cat .github/templates/INSTALLATION.md)
+          else
+            content="Installation instructions not found."
+          fi
+          
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$content" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🧠 Generate Notes (Gemini)
+        id: generate_notes
+        continue-on-error: true
+        uses: actions/github-script@v6
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          USE_AI: ${{ github.event_name == 'push' && 'true' || inputs.use_ai }}
+        with:
+          script: |
+            const script = require('./.github/scripts/generate_notes.js')
+            await script({github, context, core})
+
+      # Changelog und Status aktualisieren (nur wenn KI lief)
+      - name: 📝 Update Changelog & State
+        if: steps.generate_notes.outputs.run_status == 'success'
+        env:
+          FULL_NOTES: ${{ steps.generate_notes.outputs.full_notes }}
+        run: |
+          # Wenn CHANGELOG.md noch nicht existiert, erstellen
+          touch CHANGELOG.md
+          
+          DATE=$(date +'%Y-%m-%d')
+          
+          # Neuen Eintrag erstellen (sicherer gegen Injection)
+          {
+            echo "### $DATE - Update"
+            echo ""
+            echo "$FULL_NOTES"
+            echo ""
+            echo "---"
+            echo ""
+          } > new_entry.md
+          
+          # Vorne anfügen
+          cat new_entry.md CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+          rm new_entry.md
+
+          # State File committen (wird im nächsten Job gepusht oder hier)
+          git config --global user.name "TechAna Bot"
+          git config --global user.email "bot@techana.app"
+          git add CHANGELOG.md .github/ai_state.json
+          git commit -m "docs: Update Changelog & AI State [skip ci]" || echo "No changes"
+          git push
+
+  # --- JOB 2: BUILD & RELEASE (Shorebird) ---
+  build:
+    needs: analyze_changes
+    name: 🚀 Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            os: ubuntu-latest
+            artifact-path: TechAna-android.apk
+          - platform: ios
+            os: macos-latest
+            artifact-path: TechAna-iOS.ipa
+          - platform: windows
+            os: windows-latest
+            artifact-path: TechAna-windows.zip
+          - platform: macos
+            os: macos-latest
+            artifact-path: TechAna-macos.zip
+          - platform: linux
+            os: ubuntu-latest
+            artifact-path: TechAna-linux.zip
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: 🐦 Setup Shorebird
+        uses: shorebirdtech/setup-shorebird@v1
+        with:
+          cache: true
+
+      - name: Get Version
+        id: get_version
+        run: echo "VERSION=$(grep 'version:' pubspec.yaml | cut -d ' ' -f 2)" >> $GITHUB_ENV
+        shell: bash
+
+      # Linux Dependencies
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev zip \
+          libsecret-1-dev libjsoncpp-dev libnotify-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter clean
+
+      # --- SHOREBIRD BUILD LOGIK ---
+      - name: 🏗 Build Platform via Shorebird
+        id: shorebird_build
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+        run: |
+          echo "SHOULD_UPLOAD=false" >> $GITHUB_ENV
+          echo "🚀 Starting Shorebird logic for ${{ matrix.platform }}..."
+
+          # Android
+          if [ "${{ matrix.platform }}" == "android" ]; then
+            if shorebird patch android --no-confirm --release-version=${{ env.VERSION }}; then
+              echo "✅ Patch successfully."
+            else
+              shorebird release android --artifact=apk --no-confirm
+              echo "SHOULD_UPLOAD=true" >> $GITHUB_ENV
+            fi
+          
+          # iOS
+          elif [ "${{ matrix.platform }}" == "ios" ]; then
+            if shorebird patch ios --no-codesign --no-confirm --release-version=${{ env.VERSION }}; then
+              echo "✅ Patch successfully."
+            else
+              shorebird release ios --no-codesign --no-confirm
+              echo "SHOULD_UPLOAD=true" >> $GITHUB_ENV
+            fi
+          
+          # Windows
+          elif [ "${{ matrix.platform }}" == "windows" ]; then
+            if shorebird patch windows --no-confirm --release-version=${{ env.VERSION }}; then
+               echo "✅ Patch successfully."
+            else
+               shorebird release windows --no-confirm
+               echo "SHOULD_UPLOAD=true" >> $GITHUB_ENV
+            fi
+          
+          # macOS
+          elif [ "${{ matrix.platform }}" == "macos" ]; then
+            if shorebird patch macos --no-confirm --release-version=${{ env.VERSION }}; then
+               echo "✅ Patch successfully."
+            else
+               shorebird release macos --no-confirm
+               echo "SHOULD_UPLOAD=true" >> $GITHUB_ENV
+            fi
+
+          # Linux
+          elif [ "${{ matrix.platform }}" == "linux" ]; then
+            if shorebird patch linux --no-confirm --release-version=${{ env.VERSION }}; then
+               echo "✅ Patch successfully."
+            else
+               shorebird release linux --no-confirm
+               echo "SHOULD_UPLOAD=true" >> $GITHUB_ENV
+            fi
+          fi
+        shell: bash
+
+      # --- PACKAGING ---
+      - name: 📦 Prepare Artifacts
+        if: env.SHOULD_UPLOAD == 'true'
+        run: |
+          if [ "${{ matrix.platform }}" == "android" ]; then
+            cp build/app/outputs/apk/release/app-release.apk ./TechAna-android.apk
+          elif [ "${{ matrix.platform }}" == "ios" ]; then
+            cd build/ios/archive/Runner.xcarchive/Products/Applications/
+            mkdir Payload && cp -r Runner.app Payload/
+            zip -qq -r TechAna-iOS.ipa Payload && mv TechAna-iOS.ipa $GITHUB_WORKSPACE/
+          elif [ "${{ matrix.platform }}" == "windows" ]; then
+            powershell -Command "Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath TechAna-windows.zip"
+          elif [ "${{ matrix.platform }}" == "macos" ]; then
+            cd build/macos/Build/Products/Release/ && zip -qq -r TechAna-macos.zip *.app && mv TechAna-macos.zip $GITHUB_WORKSPACE/
+          elif [ "${{ matrix.platform }}" == "linux" ]; then
+            cd build/linux/x64/release/bundle/
+            zip -r TechAna-linux.zip .
+            mv TechAna-linux.zip $GITHUB_WORKSPACE/
+          fi
+        shell: bash
+
+      - name: 📄 Create Version JSON
+        if: matrix.platform == 'linux' && env.SHOULD_UPLOAD == 'true'
+        run: |
+          echo '{ "version": "${{ env.VERSION }}", "release_notes": "Update verfügbar" }' > version.json
+        shell: bash
+
+      - name: 📝 Prepare Upload Files
+        if: env.SHOULD_UPLOAD == 'true'
+        run: |
+          echo "FILES_TO_UPLOAD<<EOF" >> $GITHUB_ENV
+          if [ "${{ matrix.platform }}" == "android" ]; then echo "TechAna-android.apk" >> $GITHUB_ENV; fi
+          if [ "${{ matrix.platform }}" == "ios" ]; then echo "TechAna-iOS.ipa" >> $GITHUB_ENV; fi
+          if [ "${{ matrix.platform }}" == "windows" ]; then echo "TechAna-windows.zip" >> $GITHUB_ENV; fi
+          if [ "${{ matrix.platform }}" == "macos" ]; then echo "TechAna-macos.zip" >> $GITHUB_ENV; fi
+          if [ "${{ matrix.platform }}" == "linux" ]; then
+            echo '{TechAna-linux.zip,version.json}' >> $GITHUB_ENV
+          fi
+          echo "EOF" >> $GITHUB_ENV
+        shell: bash
+
+      - name: 📤 Upload to Release
+        if: env.SHOULD_UPLOAD == 'true'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.FILES_TO_UPLOAD }}
+          tag: v${{ env.VERSION }}
+          overwrite: true
+          file_glob: true
+          body: |
+            ## 🚀 TechAna v${{ env.VERSION }}
+            
+            ### 🤖 AI Update Report
+            ${{ needs.analyze_changes.outputs.full_notes }}
+
+            ---
+            
+            ${{ needs.analyze_changes.outputs.install_text }}
+
+  # --- JOB 3: README ASSEMBLER ---
+  update_readme:
+    needs: [analyze_changes, build]
+    # Läuft immer, wenn der Build erfolgreich war (auch bei Patches)
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: 🏗 Assemble README.md
+        run: |
+          # Inputs holen
+          SUMMARY="${{ needs.analyze_changes.outputs.summary }}"
+          DATE=$(date +'%d.%m.%Y')
+
+          # Prüfen ob Templates existieren
+          if [ ! -f .github/templates/README_BASE.md ]; then
+            echo "WARNUNG: .github/templates/README_BASE.md fehlt! Breche ab."
+            exit 1
+          fi
+
+          # 1. Base laden (Alles überschreiben)
+          cat .github/templates/README_BASE.md > README.md
+          
+          # 2. KI Sektion einbauen
+          echo -e "\n---\n" >> README.md
+          echo -e "## 🚀 Neuestes Update ($DATE)\n" >> README.md
+          echo -e "$SUMMARY\n" >> README.md
+          echo -e "👉 [**Komplette Update-Historie ansehen**](CHANGELOG.md)\n" >> README.md
+          
+          # 3. Installation anhängen
+          if [ -f .github/templates/INSTALLATION.md ]; then
+            echo -e "---\n" >> README.md
+            cat .github/templates/INSTALLATION.md >> README.md
+          fi
+
+      - name: 🚀 Commit & Push changes
+        run: |
+          git config --global user.name "TechAna Bot"
+          git config --global user.email "bot@techana.app"
+          
+          # Fix: Ensure we are on the correct branch and sync with remote changes from the previous job
+          git checkout ${{ github.ref_name }}
+          git pull origin ${{ github.ref_name }}
+          
+          if [[ -n $(git status -s README.md) ]]; then
+            git add README.md
+            git commit -m "docs: Rebuild README with latest changes [skip ci]"
+            git push
+          else
+            echo "No changes in README."
+          fi
