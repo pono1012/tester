@@ -14,6 +14,12 @@ on:
 permissions:
   contents: write # WICHTIG: Erlaubt dem Bot, Releases zu erstellen & README zu pushen
 
+env:
+  # HIER DAS ZIEL-REPO FÜR RELEASES ANPASSEN
+  # Leer lassen, um das aktuelle Repo zu verwenden
+  RELEASE_OWNER: '' # z.B. pono1012
+  RELEASE_REPO: ''  # z.B. tester
+
 jobs:
   # --- JOB 1: KI ANALYSE ---
   analyze_changes:
@@ -303,17 +309,21 @@ jobs:
 
       - name: 🚀 Update Latest Release Body
         uses: actions/github-script@v6
+        env:
+          PATCH_NOTES: ${{ steps.read_patch_notes.outputs.content }}
+          INSTALL_NOTES: ${{ needs.analyze_changes.outputs.install_text }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { owner, repo } = context.repo;
+            const owner = process.env.RELEASE_OWNER || context.repo.owner;
+            const repo = process.env.RELEASE_REPO || context.repo.repo;
             
             // 1. Get the latest release
             const { data: latestRelease } = await github.rest.repos.getLatestRelease({
               owner,
               repo,
             });
-
+ 
             if (!latestRelease) {
               core.setFailed("Kein Release gefunden zum Aktualisieren.");
               return;
@@ -322,8 +332,8 @@ jobs:
             console.log(`Aktualisiere Release: ${latestRelease.name} (ID: ${latestRelease.id})`);
 
             // 2. Lade die neuen und alten Inhalte
-            const patchNotes = `${{ steps.read_patch_notes.outputs.content }}`;
-            const installNotes = `${{ needs.analyze_changes.outputs.install_text }}`;
+            const patchNotes = process.env.PATCH_NOTES;
+            const installNotes = process.env.INSTALL_NOTES;
             const originalBody = latestRelease.body;
 
             // 3. Finde den Split-Punkt (die Installationsanleitung)
