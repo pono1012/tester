@@ -6,6 +6,7 @@ module.exports = async ({ github, context, core }) => {
   // 1. Schalter prüfen (kommt aus Env Variable)
   const useAI = process.env.USE_AI === 'true';
   const geminiKey = process.env.GEMINI_API_KEY;
+  const patchFile = '.github/current_patch_notes.md'; // Zwischenspeicher für Patches
 
   // --- FALL 1: AI IST AUS ---
   if (!useAI) {
@@ -13,6 +14,7 @@ module.exports = async ({ github, context, core }) => {
     core.setOutput("full_notes", "### 🔧 Wartungsupdate\n\nDies ist ein manuelles Update ohne detaillierte KI-Analyse.\nBitte Installationhinweise beachten.");
     core.setOutput("summary", "🔧 Wartungsupdate (Details folgen)");
     core.setOutput("run_status", "skipped"); // Signal für Workflow, dass wir nichts committen müssen
+    core.setOutput("update_type", "patch");
     return;
   }
 
@@ -46,6 +48,7 @@ module.exports = async ({ github, context, core }) => {
 
   // Diff holen (Von letztem AI-Stand bis HEUTE)
   let diff = "";
+  let isPatch = false;
   if (isInitialRun) {
     diff = "INITIAL_RELEASE_START";
   } else {
@@ -56,6 +59,18 @@ module.exports = async ({ github, context, core }) => {
          execSync(`git cat-file -t ${lastHash}`);
          console.log(`🔍 Vergleiche ${lastHash} bis HEAD`);
          diff = execSync(`git diff ${lastHash} HEAD -- . ":(exclude)pubspec.lock" ":(exclude)*.png"`).toString();
+
+         // --- Patch-Erkennung ---
+         // Prüfen, ob native Dateien oder Version (pubspec.yaml) geändert wurden.
+         const fileList = execSync(`git diff ${lastHash} HEAD --name-only`).toString().split('\n').filter(line => line.trim() !== '');
+         const releaseTriggers = ['android/', 'ios/', 'windows/', 'macos/', 'linux/', 'pubspec.yaml'];
+         const hasReleaseChanges = fileList.some(file => releaseTriggers.some(trigger => file.startsWith(trigger)));
+
+         if (!hasReleaseChanges && fileList.length > 0) {
+           isPatch = true;
+           console.log("🩹 Patch-Modus erkannt: Keine nativen Änderungen oder Version-Bumps.");
+         }
+         // -----------------------
       } catch (e) {
          console.log("⚠️ Alter Hash nicht gefunden (zu alt?), vergleiche nur letzten Commit.");
          diff = execSync(`git diff HEAD~1 HEAD -- . ":(exclude)pubspec.lock"`).toString();
@@ -68,30 +83,50 @@ module.exports = async ({ github, context, core }) => {
   if (diff.length > 50000) diff = diff.substring(0, 50000) + "\n... (truncated)";
 
   // Prompt mit Anweisung zur Zusammenfassung
-  const systemInstruction = `
+  let systemInstruction = "";
+
+  if (isPatch) {
+    // --- KURZER PATCH PROMPT ---
+    systemInstruction = `
+  Du bist Release-Manager für "TechAna".
+  SITUATION:
+  Dies ist ein "Shorebird Patch" (Hotfix).
+  
+  AUFGABE:
+  Erstelle GENAU EINEN Listenpunkt (Bullet Point) für diesen Fix.
+  Keine Einleitung, kein "Hier ist...", nur der Punkt.
+  
+  FORMAT:
+  TEIL 1:
+  * 🐛 Fix: [Beschreibung] (oder ⚡ Performance: ...) (Kein weiterer Text!)
+    `;
+  } else {
+    // --- NORMALER RELEASE PROMPT ---
+    systemInstruction = `
   Du bist Release-Manager für "TechAna".
   
   SITUATION:
   ${isInitialRun ? "Dies ist das allererste öffentliche Release (v1.0.0) dieses Projekts. Es gibt noch keine Historie." : "Wir analysieren alle Änderungen seit dem letzten KI-Bericht."}
   
   AUFGABE:
-  ${isInitialRun ? "Erstelle eine freundliche Begrüßung und kündige den Start von TechAna an. Erwähne kurz die Hauptfeatures (Trading, Analyse, Bot) als 'Basis Release'." : "Erstelle deutsche Release Notes basierend auf dem Diff."}
+  ${isInitialRun ? "Erstelle eine freundliche Begrüßung und kündige den Start von TechAna an." : "Erstelle professionelle, ausführliche Release Notes."}
   
   FORMAT (WICHTIG! Nutze genau dieses Trennzeichen):
   
   TEIL 1 (Ausführlich für Release Page & Changelog):
-  Überschrift: "## Update-Analyse"
-  - Fasse zusammen, was in diesem Zeitraum passiert ist.
-  - Wenn es viele Änderungen sind, gruppiere sie sinnvoll (Features, Fixes, Tech).
+  (Starte direkt mit dem Text oder kleinen Zwischenüberschriften wie "#### Highlights". Keine H1/H2/H3 Überschriften!)
+  - Fasse zusammen, was passiert ist.
+  - Gruppiere sinnvoll (Features, Fixes).
   - Erkläre den NUTZEN ("Was bringt das dem User/Dev?").
   
   ---SPLIT---
   
   TEIL 2 (Für die Front-README):
-  - Max 3 Sätze. Knackig. Was ist das Highlight dieses Zeitraums?
+  - Schreibe eine knackige Zusammenfassung (Max 3 Sätze) für den Header der README. Fokus auf Mehrwert.
   
   Hier ist der Code-Diff:
   `;
+  }
 
   const requestBody = JSON.stringify({
     contents: [{ parts: [{ text: systemInstruction + "\n" + diff }] }]
@@ -114,13 +149,38 @@ module.exports = async ({ github, context, core }) => {
         try {
           const json = JSON.parse(body);
           const txt = json.candidates[0].content.parts[0].text;
-          const parts = txt.split("---SPLIT---");
           
-          const fullNotes = parts[0].trim();
-          const summary = parts[1] ? parts[1].trim() : "Update verfügbar.";
+          let summary = "Update verfügbar";
+          let finalNote = txt;
+          let updateType = isPatch ? "patch" : "release";
+
+          if (isPatch) {
+            // --- PATCH LOGIK: ANHÄNGEN ---
+            let currentNotes = "";
+            if (fs.existsSync(patchFile)) {
+                currentNotes = fs.readFileSync(patchFile, 'utf8') + "\n";
+            }
+            // Wir speichern die Historie, geben aber nur den NEUEN Punkt zurück für das Changelog
+            // Bei Patch gibt es kein SPLIT mehr, da wir keine Readme wollen
+            const parts = txt.split("---SPLIT---"); // Fallback falls KI es doch macht
+            const newPoint = parts[0].trim();
+            fs.writeFileSync(patchFile, currentNotes + newPoint);
+            
+            finalNote = newPoint; 
+            summary = "Patch Update"; // Wird vom Workflow ignoriert
+          } else {
+            // --- RELEASE LOGIK: RESET ---
+            const parts = txt.split("---SPLIT---");
+            finalNote = parts[0].trim();
+            summary = parts[1] ? parts[1].trim() : "Großes Update";
+            
+            // Patch-Datei leeren (Reset für neuen Zyklus)
+            fs.writeFileSync(patchFile, "");
+          }
           
-          core.setOutput("full_notes", fullNotes);
+          core.setOutput("full_notes", finalNote);
           core.setOutput("summary", summary);
+          core.setOutput("update_type", updateType);
           core.setOutput("run_status", "success");
           
           // NEUEN STATE SPEICHERN (Nur im File, Commit macht der Workflow)

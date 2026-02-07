@@ -27,9 +27,6 @@ Bleib informiert mit dem integrierten News-Aggregator, der relevante Marktnachri
 #### 💼 Portfolio Tracking
 Verwalte deine Positionen und überwache deine Performance direkt in der App.
 
-#### 🔄 Automatische Updates
-TechAna nutzt Shorebird für nahtlose Over-the-Air-Updates. Kleine Verbesserungen und Bugfixes werden automatisch installiert, ohne dass du die App neu herunterladen musst.
-
 ---
 
 ### 📚 Dokumentation & Hilfe

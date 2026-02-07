@@ -392,20 +392,17 @@ class DataService {
 
     await _ensureYahooSession();
 
+    // Use chart API to get current price from meta.regularMarketPrice
     String urlStr =
-        'https://query2.finance.yahoo.com/v7/finance/quote?symbols=$ySymbol';
-    if (_yahooCrumb != null) {
-      urlStr += '&crumb=$_yahooCrumb';
-    }
-    final url = Uri.parse(urlStr);
+        'https://query2.finance.yahoo.com/v8/finance/chart/$ySymbol?interval=1d&range=1d';
+    if (_yahooCrumb != null) urlStr += '&crumb=$_yahooCrumb';
 
+    final url = Uri.parse(urlStr);
     final headers = {
       "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     };
-    if (_yahooCookie != null) {
-      headers["Cookie"] = _yahooCookie!;
-    }
+    if (_yahooCookie != null) headers["Cookie"] = _yahooCookie!;
 
     try {
       final resp = await http
@@ -425,25 +422,21 @@ class DataService {
       }
 
       final json = jsonDecode(resp.body);
-      final result = json['quoteResponse']['result'];
+      final result = json['chart']['result'];
       if (result == null || (result as List).isEmpty) {
         debugPrint("⚠️ [Yahoo] Live Preis: Keine Daten für $ySymbol");
         return null;
       }
 
       final data = result[0];
-      final price = data['regularMarketPrice'];
-      final marketState = data['marketState'];
+      final meta = data['meta'];
+      final price = meta['regularMarketPrice'];
 
-      // Nur Preise von regulären Handelssessions verwenden, um Pre/Post-Market Sprünge zu ignorieren
-      if (price is num &&
-          (marketState == "REGULAR" ||
-              marketState == "PRE" ||
-              marketState == "POST")) {
-        debugPrint("✅ [Yahoo] Live Preis $ySymbol: $price ($marketState)");
+      if (price is num) {
+        debugPrint("✅ [Yahoo] Live Preis $ySymbol: $price");
         return price.toDouble();
       }
-      debugPrint("⚠️ [Yahoo] Live Preis $ySymbol nicht im REGULAR-Markt ($marketState)");
+      debugPrint("⚠️ [Yahoo] Live Preis $ySymbol nicht verfügbar");
       return null;
     } catch (e) {
       debugPrint("❌ [Yahoo] Live Preis Fehler: $e");

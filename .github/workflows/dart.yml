@@ -23,6 +23,7 @@ jobs:
       full_notes: ${{ steps.generate_notes.outputs.full_notes || '⚠️ KI-Analyse momentan nicht verfügbar.' }}
       summary: ${{ steps.generate_notes.outputs.summary || 'Update' }}
       run_status: ${{ steps.generate_notes.outputs.run_status || 'skipped' }}
+      update_type: ${{ steps.generate_notes.outputs.update_type || 'patch' }}
       install_text: ${{ steps.read_install.outputs.content }}
     steps:
       - uses: actions/checkout@v3
@@ -66,30 +67,45 @@ jobs:
         if: steps.generate_notes.outputs.run_status == 'success'
         env:
           FULL_NOTES: ${{ steps.generate_notes.outputs.full_notes }}
+          UPDATE_TYPE: ${{ steps.generate_notes.outputs.update_type }}
         run: |
           # Wenn CHANGELOG.md noch nicht existiert, erstellen
           touch CHANGELOG.md
           
           DATE=$(date +'%Y-%m-%d')
           
-          # Neuen Eintrag erstellen (sicherer gegen Injection)
-          {
-            echo "### $DATE - Update"
-            echo ""
-            echo "$FULL_NOTES"
-            echo ""
-            echo "---"
-            echo ""
-          } > new_entry.md
-          
-          # Vorne anfügen
-          cat new_entry.md CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
-          rm new_entry.md
+          # LOGIK: Release = Neuer Eintrag oben. Patch = Unten anhängen.
+          if [ "$UPDATE_TYPE" == "patch" ]; then
+             # PATCH: Wir hängen den neuen Punkt einfach an die Datei an (oder unter den letzten Header)
+             # Da wir es einfach halten wollen: Wir fügen eine Trennlinie ein, falls noch keine da ist, oder hängen direkt an.
+             
+             # Prüfen ob "### Patches" schon existiert im letzten Block? 
+             # Einfachste Lösung: Einfach unten an CHANGELOG.md anhängen.
+             # Aber wir wollen es sauber. Wir fügen es oben unter den aktuellen Eintrag ein? 
+             # Nein, User wollte "einfach unten dran hängen".
+             
+             echo "" >> CHANGELOG.md
+             echo "$FULL_NOTES" >> CHANGELOG.md
+             
+          else
+             # RELEASE: Neuer Eintrag ganz oben
+             {
+               echo "### $DATE - Update"
+               echo ""
+               echo "$FULL_NOTES"
+               echo ""
+               echo "---"
+               echo ""
+             } > new_entry.md
+             cat new_entry.md CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+             rm new_entry.md
+          fi
 
           # State File committen (wird im nächsten Job gepusht oder hier)
           git config --global user.name "TechAna Bot"
           git config --global user.email "bot@techana.app"
-          git add CHANGELOG.md .github/ai_state.json
+          # WICHTIG: Auch die Patch-Notes Datei adden
+          git add CHANGELOG.md .github/ai_state.json .github/current_patch_notes.md
           git commit -m "docs: Update Changelog & AI State [skip ci]" || echo "No changes"
           git push
 
@@ -267,8 +283,8 @@ jobs:
   # --- JOB 3: README ASSEMBLER ---
   update_readme:
     needs: [analyze_changes, build]
-    # Läuft immer, wenn der Build erfolgreich war (auch bei Patches)
-    if: success()
+    # Läuft NUR bei echten Releases, nicht bei Patches
+    if: success() && needs.analyze_changes.outputs.update_type == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

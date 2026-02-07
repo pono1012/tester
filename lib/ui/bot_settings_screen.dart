@@ -39,8 +39,7 @@ class BotSettingsScreen extends StatelessWidget {
             ),
 
           const SizedBox(height: 16),
-
-          // --- Sektion: Routine Umfang (Performance) ---
+// --- Sektion: Routine Umfang (Performance) ---
           _buildSectionHeader(context, "Routine Umfang"),
           Card(
             child: Column(
@@ -67,7 +66,6 @@ class BotSettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-
           // --- Sektion: Routine Umfang (Performance) ---
           _buildSectionHeader(context, "Routine Umfang"),
           Card(
