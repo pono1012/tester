@@ -39,10 +39,9 @@ Du willst tiefer einsteigen? Hier findest du detaillierte Anleitungen:
 ---
 ---
 
-## 🚀 Neuestes Update (05.02.2026)
+## 🚀 Neuestes Update (07.02.2026)
 
-TEIL 2 (Für die Front-README):
-Wir freuen uns, TechAna v1.0.0 zu launchen – Ihre neue All-in-One-Plattform für intelligentes Trading und präzise Marktanalyse. Entdecken Sie unsere Kernfunktionen: leistungsstarkes Trading, tiefgehende Analyse-Tools und die Effizienz unserer integrierten Bots. Beginnen Sie jetzt, Ihre Handelsstrategien mit Vertrauen und Automatisierung zu meistern!
+Intern haben wir unsere Release-Prozesse erheblich optimiert, um zwischen Feature-Releases und Hotfixes besser zu unterscheiden. Dies sorgt für eine noch effizientere Auslieferung von Updates und eine klarere Dokumentation im Changelog. Zudem wurden interne Konfigurationen und Code für eine verbesserte Wartbarkeit angepasst.
 
 👉 [**Komplette Update-Historie ansehen**](CHANGELOG.md)
 

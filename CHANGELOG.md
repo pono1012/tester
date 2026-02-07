@@ -1,5 +1,32 @@
 ### 2026-02-07 - Update
 
+#### Wichtige Neuerungen im Release-Management-Prozess
+
+Wir freuen uns, Ihnen wichtige Verbesserungen in unserem internen Release-Management-Workflow vorstellen zu können. Diese Änderungen optimieren die Art und Weise, wie Updates an Sie ausgeliefert und dokumentiert werden, und ermöglichen eine präzisere Unterscheidung zwischen größeren Feature-Releases und kleineren Hotfixes oder Patches.
+
+*   **Intelligente Unterscheidung zwischen Releases und Patches:** Unser System ist nun in der Lage, automatisch zu erkennen, ob ein Update ein vollständiges "Release" (das native Änderungen oder einen Version-Bump umfasst) oder ein leichter "Patch" (rein serverseitige Code-Updates) ist.
+    *   **Nutzen für Dev/Operations:** Dies ermöglicht eine agilere und zielgerichtete Update-Strategie. Patches können schneller und mit weniger Overhead ausgerollt werden, da sie keine vollständigen Neukompilierungen der nativen App erfordern. Für Nutzer bedeutet dies potenziell schnellere Fehlerbehebungen und kleinere Verbesserungen.
+
+*   **Optimiertes Changelog-Management:**
+    *   **Anhängen von Patches:** Kleinere Patches werden nun intelligent an den bestehenden Changelog-Eintrag angehängt, anstatt einen neuen, separaten Eintrag zu erstellen. Dies hält das Changelog übersichtlich und fokussiert.
+    *   **Dedizierte Release-Einträge:** Volle Releases erhalten weiterhin ihren eigenen, ausführlichen Abschnitt an der Spitze des Changelogs, um ihre Bedeutung und den Umfang der Änderungen hervorzuheben.
+    *   **Nutzen für den User/Dev:** Eine klarere und besser strukturierte Historie der Projektentwicklung, die es einfacher macht, den Überblick über die Veränderungen zu behalten und schnell relevante Informationen zu finden.
+
+*   **Gezielte README-Aktualisierungen:** Die Haupt-README des Projekts wird nun nur noch bei echten, umfassenden Releases automatisch aktualisiert. Dies vermeidet unnötige Commits und Versionierungen der README bei kleineren Patch-Updates.
+    *   **Nutzen für den Dev/Maintainer:** Reduziert "Noise" in der Git-Historie und stellt sicher, dass die README nur dann angepasst wird, wenn es signifikante Änderungen gibt, die eine neue Zusammenfassung rechtfertigen.
+
+#### Technische Verbesserungen & Code-Pflege
+
+*   **Interne Shorebird App ID Aktualisierung:** Die Shorebird `app_id` in der `shorebird.yaml`-Konfiguration wurde aktualisiert. Dies ist eine routinemäßige interne Anpassung, die keine direkten Auswirkungen auf die Nutzung oder Funktionalität von TechAna hat.
+    *   **Nutzen für den Dev/Operations:** Gewährleistet die korrekte Anbindung an unsere Deployment-Infrastruktur für zukünftige Updates.
+
+*   **Code-Bereinigung im Bot-Einstellungen-Bildschirm:** Ein redundanter interner Kommentar im Code für den Bot-Einstellungen-Bildschirm (`lib/ui/bot_settings_screen.dart`) wurde entfernt.
+    *   **Nutzen für den Dev:** Trägt zu einer saubereren und leichter wartbaren Codebasis bei. Keine Auswirkungen auf die Benutzeroberfläche.
+
+---
+
+### 2026-02-07 - Update
+
 #### Highlights
 
 *   **Überarbeitete Einstellungen mit Tab-Navigation:** Die gesamte Einstellungsseite wurde für eine deutlich verbesserte Benutzerfreundlichkeit komplett neu strukturiert. Einstellungen sind nun übersichtlich in den Kategorien "Ansicht", "Chart", "Strategie" und "Daten" mittels Tabs organisiert.
