@@ -91,3 +91,4 @@ Mit v1.0.0 haben wir den Grundstein gelegt. Dies ist nur der Anfang. Wir werden 
 ---
 
 # Update Historie
+* 🐛 Fix: Redundanten Code im Bot-Einstellungen-Bildschirm entfernt.
