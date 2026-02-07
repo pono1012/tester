@@ -142,7 +142,7 @@ module.exports = async ({ github, context, core }) => {
 
   const options = {
     hostname: 'generativelanguage.googleapis.com',
-    path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+    path: `/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   };
