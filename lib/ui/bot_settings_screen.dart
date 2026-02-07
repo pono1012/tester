@@ -67,6 +67,34 @@ class BotSettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
+ // --- Sektion: Routine Umfang (Performance) ---
+          _buildSectionHeader(context, "Routine Umfang"),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text("Pending Orders prüfen"),
+                  subtitle: const Text("Prüft ob Limit/Stop Orders ausgeführt wurden."),
+                  value: bot.enableCheckPending,
+                  onChanged: (v) => bot.updateRoutineFlags(pending: v),
+                ),
+                SwitchListTile(
+                  title: const Text("Offene Positionen prüfen"),
+                  subtitle: const Text("Prüft SL/TP und aktualisiert PnL."),
+                  value: bot.enableCheckOpen,
+                  onChanged: (v) => bot.updateRoutineFlags(open: v),
+                ),
+                SwitchListTile(
+                  title: const Text("Nach neuen Trades suchen"),
+                  subtitle: const Text("Scannt die Watchlist nach neuen Signalen."),
+                  value: bot.enableScanNew,
+                  onChanged: (v) => bot.updateRoutineFlags(scan: v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // --- Sektion 1: Money Management ---
           _buildSectionHeader(context, "Money Management"),
           Card(

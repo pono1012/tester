@@ -49,6 +49,7 @@ module.exports = async ({ github, context, core }) => {
   // Diff holen (Von letztem AI-Stand bis HEUTE)
   let diff = "";
   let isPatch = false;
+  let changedFilesSection = ""; // NEU: Speicher für die Dateiliste
   if (isInitialRun) {
     diff = "INITIAL_RELEASE_START";
   } else {
@@ -58,17 +59,24 @@ module.exports = async ({ github, context, core }) => {
       try {
          execSync(`git cat-file -t ${lastHash}`);
          console.log(`🔍 Vergleiche ${lastHash} bis HEAD`);
-         diff = execSync(`git diff ${lastHash} HEAD -- . ":(exclude)pubspec.lock" ":(exclude)*.png"`).toString();
 
          // --- Patch-Erkennung ---
-         // Prüfen, ob native Dateien oder Version (pubspec.yaml) geändert wurden.
-         const fileList = execSync(`git diff ${lastHash} HEAD --name-only`).toString().split('\n').filter(line => line.trim() !== '');
+         const rawFileList = execSync(`git diff ${lastHash} HEAD --name-only`).toString();
+         const fileList = rawFileList.split('\n').filter(line => line.trim() !== '');
          const releaseTriggers = ['android/', 'ios/', 'windows/', 'macos/', 'linux/', 'pubspec.yaml'];
          const hasReleaseChanges = fileList.some(file => releaseTriggers.some(trigger => file.startsWith(trigger)));
 
          if (!hasReleaseChanges && fileList.length > 0) {
            isPatch = true;
            console.log("🩹 Patch-Modus erkannt: Keine nativen Änderungen oder Version-Bumps.");
+         }
+
+         // --- Diff und Dateiliste für die KI und Notes generieren ---
+         diff = execSync(`git diff ${lastHash} HEAD -- . ":(exclude)pubspec.lock" ":(exclude)*.png"`).toString();
+         
+         if (fileList.length > 0) {
+            changedFilesSection = "### 📂 Geänderte Dateien\n";
+            changedFilesSection += fileList.map(f => `- \`${f}\``).join('\n');
          }
          // -----------------------
       } catch (e) {
@@ -134,7 +142,7 @@ module.exports = async ({ github, context, core }) => {
 
   const options = {
     hostname: 'generativelanguage.googleapis.com',
-    path: `/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+    path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' }
   };
@@ -148,41 +156,46 @@ module.exports = async ({ github, context, core }) => {
         
         try {
           const json = JSON.parse(body);
-          const txt = json.candidates[0].content.parts[0].text;
-          
-          let summary = "Update verfügbar";
-          let finalNote = txt;
-          let updateType = isPatch ? "patch" : "release";
+          const text = json.candidates[0].content.parts[0].text;
 
           if (isPatch) {
-            // --- PATCH LOGIK: ANHÄNGEN ---
-            let currentNotes = "";
-            if (fs.existsSync(patchFile)) {
-                currentNotes = fs.readFileSync(patchFile, 'utf8') + "\n";
+            // --- PATCH LOGIK ---
+            const newPoint = text.trim(); // AI gibt nur den Bullet Point zurück
+            const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+            // Kompletter Block für diesen Patch
+            let patchBlock = `### 🩹 Patch vom ${date}\n\n${newPoint}\n\n`;
+            if (changedFilesSection) {
+                patchBlock += `${changedFilesSection}\n\n---\n`;
             }
-            // Wir speichern die Historie, geben aber nur den NEUEN Punkt zurück für das Changelog
-            // Bei Patch gibt es kein SPLIT mehr, da wir keine Readme wollen
-            const parts = txt.split("---SPLIT---"); // Fallback falls KI es doch macht
-            const newPoint = parts[0].trim();
-            fs.writeFileSync(patchFile, currentNotes + newPoint);
-            
-            finalNote = newPoint; 
-            summary = "Patch Update"; // Wird vom Workflow ignoriert
+
+            // Bestehende Patch-Notes laden und neuen Block voranstellen
+            let existingPatches = "";
+            if (fs.existsSync(patchFile)) {
+                existingPatches = fs.readFileSync(patchFile, 'utf8');
+            }
+            fs.writeFileSync(patchFile, patchBlock + existingPatches);
+
+            core.setOutput("full_notes", newPoint); // Fürs Changelog reicht der Punkt
+            core.setOutput("summary", "Patch Update");
+            core.setOutput("update_type", "patch");
           } else {
-            // --- RELEASE LOGIK: RESET ---
-            const parts = txt.split("---SPLIT---");
-            finalNote = parts[0].trim();
-            summary = parts[1] ? parts[1].trim() : "Großes Update";
-            
+            // --- RELEASE LOGIK ---
+            const parts = text.split("---SPLIT---");
+            let fullNotes = parts[0].trim();
+            const summary = parts[1] ? parts[1].trim() : "Großes Update";
+
+            if (changedFilesSection) {
+                fullNotes += `\n\n${changedFilesSection}`;
+            }
             // Patch-Datei leeren (Reset für neuen Zyklus)
             fs.writeFileSync(patchFile, "");
+            core.setOutput("full_notes", fullNotes);
+            core.setOutput("summary", summary);
+            core.setOutput("update_type", "release");
           }
-          
-          core.setOutput("full_notes", finalNote);
-          core.setOutput("summary", summary);
-          core.setOutput("update_type", updateType);
+
           core.setOutput("run_status", "success");
-          
           // NEUEN STATE SPEICHERN (Nur im File, Commit macht der Workflow)
           // Wir speichern den aktuellen HEAD als neuen "letzten Stand"
           const currentHead = execSync('git rev-parse HEAD').toString().trim();

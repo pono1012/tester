@@ -280,10 +280,69 @@ jobs:
             
             ${{ needs.analyze_changes.outputs.install_text }}
 
-  # --- JOB 3: README ASSEMBLER ---
-  update_readme:
+  # --- JOB 3: UPDATE RELEASE ON PATCH ---
+  update_release_on_patch:
+    name: 📝 Update Release on Patch
     needs: [analyze_changes, build]
-    # Läuft NUR bei echten Releases, nicht bei Patches
+    if: success() && needs.analyze_changes.outputs.update_type == 'patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: 📄 Read Patch Notes
+        id: read_patch_notes
+        run: |
+          if [ -f .github/current_patch_notes.md ]; then
+            content=$(cat .github/current_patch_notes.md)
+          else
+            content="Keine Patch-Notes gefunden."
+          fi
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$content" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🚀 Update Latest Release Body
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            
+            // 1. Get the latest release
+            const { data: latestRelease } = await github.rest.repos.getLatestRelease({
+              owner,
+              repo,
+            });
+
+            if (!latestRelease) {
+              core.setFailed("Kein Release gefunden zum Aktualisieren.");
+              return;
+            }
+
+            console.log(`Aktualisiere Release: ${latestRelease.name} (ID: ${latestRelease.id})`);
+
+            // 2. Lade die neuen und alten Inhalte
+            const patchNotes = `${{ steps.read_patch_notes.outputs.content }}`;
+            const installNotes = `${{ needs.analyze_changes.outputs.install_text }}`;
+            const originalBody = latestRelease.body;
+
+            // 3. Finde den Split-Punkt (die Installationsanleitung)
+            const separator = "---";
+            const installHeader = "🛠 Installation & Downloads";
+            const separatorIndex = originalBody.lastIndexOf(`${separator}\n\n${installHeader}`);
+            
+            const mainNotes = separatorIndex !== -1 ? originalBody.substring(0, separatorIndex).trim() : originalBody;
+
+            // 4. Baue den neuen Body zusammen
+            const newBody = `${mainNotes}\n\n${patchNotes}\n\n${separator}\n\n${installNotes}`;
+
+            // 5. Update the release
+            await github.rest.repos.updateRelease({ owner, repo, release_id: latestRelease.id, body: newBody });
+            console.log("✅ Release Body wurde erfolgreich mit Patch-Informationen aktualisiert.");
+
+  # --- JOB 4: README ASSEMBLER ---
+  update_readme:
+    needs: [analyze_changes]
     if: success() && needs.analyze_changes.outputs.update_type == 'release'
     runs-on: ubuntu-latest
     steps:
