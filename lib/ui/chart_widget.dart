@@ -315,8 +315,18 @@ class ChartWidget extends StatelessWidget {
             touchTooltipData: LineTouchTooltipData(
               getTooltipItems: (touchedSpots) {
                 return touchedSpots.map((spot) {
-                  return LineTooltipItem(spot.y.toStringAsFixed(2),
-                      const TextStyle(color: Colors.white));
+                  if (spot.barIndex == 0) { // Nur Preislinie (Index 0)
+                    final barIndex = spot.x.toInt();
+                    if (barIndex >= 0 && barIndex < bars.length) {
+                      final bar = bars[barIndex];
+                      final dateStr = "${bar.date.day}.${bar.date.month}.${bar.date.year}";
+                      return LineTooltipItem(
+                        "$dateStr: ${spot.y.toStringAsFixed(2)}",
+                        const TextStyle(color: Colors.white, fontSize: 12),
+                      );
+                    }
+                  }
+                  return null; // Kein Tooltip für andere Linien
                 }).toList();
               },
             ),

@@ -150,6 +150,8 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                     _buildFilterChip("Offen"),
                     _buildFilterChip("Pending"),
                     _buildFilterChip("Geschlossen"),
+                    _buildFilterChip("Geschlossen +"),
+                    _buildFilterChip("Geschlossen -"),
                     _buildFilterChip("Plus"),
                     _buildFilterChip("Minus"),
                   ],
@@ -174,6 +176,12 @@ class _BotDashboardScreenState extends State<BotDashboardScreen> {
                           if (_filter == "Offen" && trade.status != TradeStatus.open) return const SizedBox();
                           if (_filter == "Pending" && trade.status != TradeStatus.pending) return const SizedBox();
                           if (_filter == "Geschlossen" && (trade.status == TradeStatus.open || trade.status == TradeStatus.pending)) return const SizedBox();
+                          if (_filter == "Geschlossen +") {
+                            if (trade.status == TradeStatus.open || trade.status == TradeStatus.pending || trade.realizedPnL <= 0) return const SizedBox();
+                          }
+                          if (_filter == "Geschlossen -") {
+                            if (trade.status == TradeStatus.open || trade.status == TradeStatus.pending || trade.realizedPnL >= 0) return const SizedBox();
+                          }
                           if (_filter == "Plus") {
                             double pnl = trade.status == TradeStatus.open ? trade.calcUnrealizedPnL(trade.lastPrice ?? trade.entryPrice) : trade.realizedPnL;
                             if (pnl <= 0) return const SizedBox();

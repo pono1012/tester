@@ -1,7 +1,5 @@
 ### 🛠 Installation & Downloads
 
-**💡 Hinweis:** TechAna verwendet Shorebird für automatische Updates. Nach der Installation erhältst du Updates automatisch im Hintergrund – keine manuellen Downloads nötig!
-
 #### 🤖 Android
 Lade die `.apk` Datei herunter und installiere sie direkt.
 
