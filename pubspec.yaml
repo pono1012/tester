@@ -1,7 +1,7 @@
 name: techana
 description: TechAna — Professionelle App für technische Analyse mit automatisierten Trading-Signalen, Chart-Projektionen, Candlestick-Mustererkennung und flexiblen Datenquellen.
 publish_to: "none"
-version: 1.0.0+3
+version: 1.0.0+4
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
