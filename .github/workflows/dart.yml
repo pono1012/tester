@@ -293,7 +293,11 @@ jobs:
     if: success() && needs.analyze_changes.outputs.update_type == 'patch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3 # Lädt den Code-Stand, der den Workflow gestartet hat
+
+      - name: 🔄 Sync with remote changes from analysis job
+        run: git pull origin ${{ github.ref_name }}
+        shell: bash
 
       - name: 📄 Read Patch Notes
         id: read_patch_notes
@@ -354,8 +358,8 @@ jobs:
             // Die "Basis-Notes" sind alles vor dem ersten Patch.
             const baseNotes = firstPatchIndex !== -1 ? cleanTopPart.substring(0, firstPatchIndex).trim() : cleanTopPart;
 
-            // Die Installations-Sektion wird immer frisch aus dem Template gebaut, um sauber zu sein.
-            const installSection = `${installHeader}\n\n${installNotes.trim()}`;
+            // Die Installations-Sektion kommt direkt aus dem Template (inkl. Header).
+            const installSection = installNotes.trim();
 
             // 4. Baue den neuen Body in der gewünschten Reihenfolge zusammen: Basis + Installation + Patches
             const newBody = `${baseNotes}\n\n${separator}\n\n${installSection}\n\n${patchNotes.trim()}`;
