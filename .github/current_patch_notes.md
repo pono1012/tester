@@ -1,3 +1,11 @@
+### 🩹 Patch vom 08.02.2026 um 02:01 Uhr
+
+* 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.
+
+### 📂 Geänderte Dateien
+- `.github/workflows/dart.yml`
+
+---
 ### 🩹 Patch vom 08.02.2026 um 01:36 Uhr
 
 * 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.

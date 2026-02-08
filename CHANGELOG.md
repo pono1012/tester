@@ -128,3 +128,5 @@ Mit v1.0.0 haben wir den Grundstein gelegt. Dies ist nur der Anfang. Wir werden 
 * 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.
 
 * 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.
+
+* 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.
