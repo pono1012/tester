@@ -62,7 +62,11 @@ module.exports = async ({ github, context, core }) => {
 
          // --- Patch-Erkennung ---
          const rawFileList = execSync(`git diff ${lastHash} HEAD --name-only`).toString();
-         const fileList = rawFileList.split('\n').filter(line => line.trim() !== '');
+         const filesToExclude = ['.github/ai_state.json', '.github/current_patch_notes.md', 'CHANGELOG.md'];
+         const fileList = rawFileList.split('\n').filter(line => {
+            const trimmedLine = line.trim();
+            return trimmedLine !== '' && !filesToExclude.includes(trimmedLine);
+         });
          const releaseTriggers = ['android/', 'ios/', 'windows/', 'macos/', 'linux/', 'pubspec.yaml'];
          const hasReleaseChanges = fileList.some(file => releaseTriggers.some(trigger => file.startsWith(trigger)));
 
@@ -81,7 +85,29 @@ module.exports = async ({ github, context, core }) => {
          // -----------------------
       } catch (e) {
          console.log("⚠️ Alter Hash nicht gefunden (zu alt?), vergleiche nur letzten Commit.");
-         diff = execSync(`git diff HEAD~1 HEAD -- . ":(exclude)pubspec.lock"`).toString();
+         lastHash = "HEAD~1"; // Setze den Hash für die Logik zurück
+
+         // --- Führe die Logik erneut aus mit dem Fallback-Hash ---
+         const rawFileList = execSync(`git diff ${lastHash} HEAD --name-only`).toString();
+         const filesToExclude = ['.github/ai_state.json', '.github/current_patch_notes.md', 'CHANGELOG.md'];
+         const fileList = rawFileList.split('\n').filter(line => {
+            const trimmedLine = line.trim();
+            return trimmedLine !== '' && !filesToExclude.includes(trimmedLine);
+         });
+         const releaseTriggers = ['android/', 'ios/', 'windows/', 'macos/', 'linux/', 'pubspec.yaml'];
+         const hasReleaseChanges = fileList.some(file => releaseTriggers.some(trigger => file.startsWith(trigger)));
+
+         if (!hasReleaseChanges && fileList.length > 0) {
+           isPatch = true;
+           console.log("🩹 Patch-Modus erkannt (im Fallback): Keine nativen Änderungen.");
+         }
+
+         diff = execSync(`git diff ${lastHash} HEAD -- . ":(exclude)pubspec.lock" ":(exclude)*.png"`).toString();
+         
+         if (fileList.length > 0) {
+            changedFilesSection = "### 📂 Geänderte Dateien\n";
+            changedFilesSection += fileList.map(f => `- \`${f}\``).join('\n');
+         }
       }
     } catch (error) {
       diff = "Fehler beim Diff";
@@ -161,10 +187,12 @@ module.exports = async ({ github, context, core }) => {
           if (isPatch) {
             // --- PATCH LOGIK ---
             const newPoint = text.trim(); // AI gibt nur den Bullet Point zurück
-            const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const now = new Date();
+            const date = now.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            const time = now.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
 
             // Kompletter Block für diesen Patch
-            let patchBlock = `### 🩹 Patch vom ${date}\n\n${newPoint}\n\n`;
+            let patchBlock = `### 🩹 Patch vom ${date} um ${time} Uhr\n\n${newPoint}\n\n`;
             if (changedFilesSection) {
                 patchBlock += `${changedFilesSection}\n\n---\n`;
             }
