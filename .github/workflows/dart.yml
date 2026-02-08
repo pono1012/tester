@@ -336,23 +336,34 @@ jobs:
             const installNotes = process.env.INSTALL_NOTES;
             const originalBody = latestRelease.body;
 
-            // 3. Finde den Split-Punkt (die Installationsanleitung)
+            // 3. Zerlege den Body in seine Teile: Basis-Notes, alte Patches, Installation
             const separator = "---";
-            const installHeader = "🛠 Installation & Downloads";
-            const separatorIndex = originalBody.lastIndexOf(`${separator}\n\n${installHeader}`);
-            
-            const mainNotes = separatorIndex !== -1 ? originalBody.substring(0, separatorIndex).trim() : originalBody;
+            const installHeader = "### 🛠 Installation & Downloads";
+            const patchHeader = "### 🩹 Patch vom";
 
-            // 4. Baue den neuen Body zusammen
-            const newBody = `${mainNotes}\n\n${patchNotes}\n\n${separator}\n\n${installNotes}`;
+            // Finde die Installations-Sektion. Alles danach wird ignoriert.
+            const installSectionIndex = originalBody.indexOf(installHeader);
+            const topPart = installSectionIndex !== -1 ? originalBody.substring(0, installSectionIndex).trim() : originalBody.trim();
+
+            // Entferne den Separator am Ende des oberen Teils, falls vorhanden
+            const cleanTopPart = topPart.endsWith(separator) ? topPart.substring(0, topPart.length - separator.length).trim() : topPart;
+
+            // Finde den Start der alten Patch-Sektion im oberen Teil
+            const firstPatchIndex = cleanTopPart.indexOf(patchHeader);
+
+            // Die "Basis-Notes" sind alles vor dem ersten Patch.
+            const baseNotes = firstPatchIndex !== -1 ? cleanTopPart.substring(0, firstPatchIndex).trim() : cleanTopPart;
+
+            // Die Installations-Sektion wird immer frisch aus dem Template gebaut, um sauber zu sein.
+            const installSection = `${installHeader}\n\n${installNotes.trim()}`;
+
+            // 4. Baue den neuen Body in der gewünschten Reihenfolge zusammen: Basis + Installation + Patches
+            const newBody = `${baseNotes}\n\n${separator}\n\n${installSection}\n\n${patchNotes.trim()}`;
 
             // 5. Update the release
             await github.rest.repos.updateRelease({ owner, repo, release_id: latestRelease.id, body: newBody });
             console.log("✅ Release Body wurde erfolgreich mit Patch-Informationen aktualisiert.");
 
-  # --- JOB 4: README ASSEMBLER ---
-  update_readme:
-    needs: [analyze_changes]
     if: success() && needs.analyze_changes.outputs.update_type == 'release'
     runs-on: ubuntu-latest
     steps:
