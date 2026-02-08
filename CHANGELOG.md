@@ -94,3 +94,5 @@ Mit v1.0.0 haben wir den Grundstein gelegt. Dies ist nur der Anfang. Wir werden 
 * 🐛 Fix: Redundanten Code im Bot-Einstellungen-Bildschirm entfernt.
 
 * 🐛 Fix: Einstellungen für den Routineumfang im Bot-Einstellungen-Bildschirm wiederhergestellt.
+
+* 🐛 Fix: Einstellungen für den Routineumfang im Bot-Einstellungen-Bildschirm wiederhergestellt.
