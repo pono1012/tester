@@ -39,9 +39,9 @@ Du willst tiefer einsteigen? Hier findest du detaillierte Anleitungen:
 ---
 ---
 
-## 🚀 Neuestes Update (07.02.2026)
+## 🚀 Neuestes Update (08.02.2026)
 
-Intern haben wir unsere Release-Prozesse erheblich optimiert, um zwischen Feature-Releases und Hotfixes besser zu unterscheiden. Dies sorgt für eine noch effizientere Auslieferung von Updates und eine klarere Dokumentation im Changelog. Zudem wurden interne Konfigurationen und Code für eine verbesserte Wartbarkeit angepasst.
+Dieses Update (v1.0.0+4) verbessert die Benutzeroberfläche von TechAna durch die Entfernung redundanter Elemente im Bot-Einstellungen-Bildschirm für eine klarere Konfiguration. Gleichzeitig wurden interne Prozesse optimiert, um die Stabilität und Effizienz der Anwendung weiter zu erhöhen. Genießen Sie eine noch präzisere und stabilere Plattform für Ihre technische Analyse.
 
 👉 [**Komplette Update-Historie ansehen**](CHANGELOG.md)
 

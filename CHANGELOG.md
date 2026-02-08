@@ -1,3 +1,29 @@
+### 2026-02-08 - Update
+
+Dies ist die neueste Version von TechAna, v1.0.0+4, die sich auf die Verfeinerung der Benutzeroberfläche und die Stärkung unserer internen Systemstabilität konzentriert. Wir haben einen wichtigen Fehler in den Bot-Einstellungen behoben und zugleich die Grundlagen für zukünftige Entwicklungen durch verbesserte Wartung und optimierte Workflows gelegt.
+
+#### Bug Fixes
+
+*   **Optimierung des Bot-Einstellungen-Bildschirms:** Ein redundanter "Routine Umfang"-Abschnitt, der doppelt angezeigt wurde, wurde aus dem Bot-Einstellungen-Bildschirm entfernt.
+    *   **Nutzen für den Nutzer:** Diese Korrektur sorgt für eine übersichtlichere und intuitive Benutzeroberfläche. Nutzer können die Einstellungen ihrer Bots nun einfacher und ohne Verwirrung konfigurieren, was die Effizienz und Benutzerfreundlichkeit der App deutlich verbessert.
+
+#### Interne Verbesserungen & Wartung
+
+*   **Version-Update:** Die Anwendungsversion wurde auf `1.0.0+4` aktualisiert.
+    *   **Nutzen für den Nutzer/Entwickler:** Dies signalisiert eine offizielle Veröffentlichung mit den neuesten Korrekturen und Verbesserungen. Für Entwickler bedeutet es eine klare Versionierung, die die Nachverfolgbarkeit von Änderungen erleichtert.
+*   **AI-Status-Management:** Der interne Zustand und der letzte Commit des KI-Systems (`last_ai_commit`) wurden aktualisiert.
+    *   **Nutzen für den Nutzer/Entwickler:** Obwohl dies eine rein interne Anpassung ist, stellt sie sicher, dass unsere KI-Berichte und Analysen auf dem aktuellsten Datenstand basieren. Es ist entscheidend für die fortlaufende Genauigkeit und Zuverlässigkeit der automatisierten Analysefunktionen von TechAna und ermöglicht Entwicklern eine konsistente Basis für KI-bezogene Aufgaben.
+*   **CI/CD Workflow-Optimierungen:** Es wurden Anpassungen an unseren internen CI/CD (Continuous Integration/Continuous Deployment) Workflows vorgenommen, insbesondere im Zusammenhang mit der `dart.yml` Konfiguration.
+    *   **Nutzen für den Entwickler:** Diese technischen Anpassungen sind entscheidend für eine reibungslose und effiziente Entwicklungsumgebung. Sie tragen dazu bei, die Qualität, Stabilität und die Liefergeschwindigkeit zukünftiger Releases zu gewährleisten, indem sie den Build- und Deployment-Prozess optimieren.
+
+### 📂 Geänderte Dateien
+- `.github/ai_state.json`
+- `.github/current_patch_notes.md`
+- `CHANGELOG.md`
+- `pubspec.yaml`
+
+---
+
 ### 2026-02-07 - Update
 
 #### Wichtige Neuerungen im Release-Management-Prozess
