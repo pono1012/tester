@@ -96,3 +96,5 @@ Mit v1.0.0 haben wir den Grundstein gelegt. Dies ist nur der Anfang. Wir werden 
 * 🐛 Fix: Einstellungen für den Routineumfang im Bot-Einstellungen-Bildschirm wiederhergestellt.
 
 * 🐛 Fix: Einstellungen für den Routineumfang im Bot-Einstellungen-Bildschirm wiederhergestellt.
+
+* 🐛 Fix: Redundanten "Routine Umfang"-Abschnitt aus dem Bot-Einstellungen-Bildschirm entfernt.
