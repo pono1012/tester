@@ -364,6 +364,9 @@ jobs:
             await github.rest.repos.updateRelease({ owner, repo, release_id: latestRelease.id, body: newBody });
             console.log("✅ Release Body wurde erfolgreich mit Patch-Informationen aktualisiert.");
 
+  update_readme_on_release:
+    name: 📚 Update README on Release
+    needs: [analyze_changes]
     if: success() && needs.analyze_changes.outputs.update_type == 'release'
     runs-on: ubuntu-latest
     steps:
